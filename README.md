@@ -127,7 +127,7 @@ mandelflow/
 - [ ] **Stage 08** — Single GCE VM, CPU kernel (s03); Terraform provisions the VM, GCS bucket, attached service account; s07's loop runs in the container with output to `gs://bucket/run.zarr`.
 - [ ] **Stage 09** — Multi-machine CPU fan-out, likely via Cloud Run Jobs running the s04 kernel — placeholder until s08 is exercised.
 - [ ] **Stage 10** — Single cloud VM with a GPU, s06 kernel — placeholder (GCP quota blocked on new project; may target multi-cloud).
-- [ ] **Stage 11** — Terraform GKE Standard + GPU node pool + Workload Identity Federation; frame ranges fanned across Pods via Dagster K8s executor; icechunk repo in `gs://bucket/run.icechunk` via `IcechunkGCSIOManager`.
+- [ ] **Stage 11** — Terraform GKE Standard + GPU node pool + Workload Identity Federation; frame ranges fanned across Pods via Dagster K8s executor; icechunk repo in `gs://bucket/run.icechunk` via the `IcechunkFrameIOManager` in `orchestration/definitions.py`.
 - [ ] **Stage 12** — FastAPI tile server over precomputed Zarrs (frame PNGs + slippy-map tiles). Pure CPU; deploys to Cloud Run and scales to zero.
 - [ ] **CI** — `pr.yml` runs stages 00–04 + 07 at small scales; lints Terraform; validates Dagster definitions.
 - [ ] **`bench/`** — aggregate run.json across stages, regenerate the talk-style scaling chart.

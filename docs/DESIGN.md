@@ -31,7 +31,7 @@ Dagster's asset model maps directly onto Zarr-as-data-product:
 
 - **Assets ≡ Zarrs.** The asset graph is the Zarr lineage graph.
 - **Partitions ≡ frames.** The `iterations` asset is always partitioned by frame. Single-frame stages (00–06) have one partition (frame=0); multi-frame stages (07+) have many. Intra-frame parallelism (Dask tiles in stage 04, GPU kernels in 05–06) happens inside the stage's `compute_frame`; inter-frame parallelism is Dagster's partition fan-out. Local execution uses a process pool over partitions; cluster execution uses one K8s job per partition.
-- **IOManagers ≡ storage.** Configure-time choice between `LocalZarrIOManager` and `GCSIcechunkIOManager`. The compute code does not know where its bytes land.
+- **IOManagers ≡ storage.** Configure-time choice between `ZarrFrameIOManager` (raw Zarr at any path — local FS or `gs://`) and `IcechunkFrameIOManager` (icechunk at any path — local FS, `gs://`, `s3://`, Azure, R2, etc.). Both implement the same `handle_output(np.ndarray) → frame_chunk` contract; the asset doesn't know which is in use. Selectable via `MANDELFLOW_STORAGE=icechunk` env var. See `orchestration/definitions.py`.
 - **Asset graph UI.** `dagster dev` shows lineage, materialisation status, and per-partition runs.
 
 ## 4. FastAPI is the read layer
@@ -129,7 +129,7 @@ Local development does not require Docker — macOS development is native (see [
 
 Things the architecture *names* but does not yet provide. Called out here so the docs don't oversell.
 
-- **`GCSIcechunkIOManager`.** Referenced throughout but not yet a published package. Needs writing — a thin shim translating Dagster's `IOManager.load_input` / `handle_output` to icechunk session open / commit. Roughly a few hundred lines. Falls back to raw Zarr with `to_zarr(region=...)` if the icechunk integration proves heavier than expected; document the regression if that happens.
+- ~~**`GCSIcechunkIOManager`**~~ — implemented as `IcechunkFrameIOManager` in `orchestration/definitions.py`. Single class handles all icechunk storage backends (local FS / GCS / S3 / Azure / R2 / Tigris); paths are auto-routed by URL prefix. ~50 lines including schema init.
 - **GL context lifecycle for any future on-demand rendering.** `render/gl_context.py` creates a fresh context per call. Any long-running process that uses it (e.g. a future render-on-demand service replacing stage 12's tile-only scope) needs a process-lifecycle singleton, not per-request initialisation. Stage 12's tile server avoids this entirely by serving only precomputed tiles.
 - **The tile pyramid generator.** Stage 12 serves `/tiles/{z}/{x}/{y}.png` from a pyramid; the *generator* for that pyramid is its own piece of work — either an output of the compute stage or a downstream Dagster asset that reads the iterations Zarr and writes a pyramid Zarr/icechunk store.
 
