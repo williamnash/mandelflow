@@ -1,7 +1,10 @@
-# Example Pod spec for one frame's compute job.
+# Pod template for one frame range. The dispatcher in run.py renders one of
+# these per Pod, substituting `frame-start`, `frame-end`, the image tag, and
+# the output URL.
 #
-# Submit with: kubectl apply -f stages/s08_zoom_cloud/k8s/compute-pod.yaml
-# After it completes, the chunk lands at gs://<bucket>/runs/<run_id>.zarr/iterations/<frame>.0.0
+# Submit a single Pod manually for plumbing tests:
+#   kubectl apply -f stages/s09_zoom_fanout/k8s/compute-pod.yaml
+# After it completes, that range's chunks land at gs://<bucket>/runs/<id>.zarr/.
 #
 # The KSA `compute-sa` must be annotated to impersonate the GCP service
 # account `mandelflow-compute@<project>.iam.gserviceaccount.com`. Terraform
@@ -11,16 +14,16 @@
 #   kubectl annotate serviceaccount compute-sa \
 #     iam.gke.io/gcp-service-account=mandelflow-compute@<project>.iam.gserviceaccount.com
 #
-# TODO(s08): bake the KSA + annotation into a Helm chart or kustomization
-# so it's reproducible. For first apply, kubectl is fine.
+# TODO(s09): bake the KSA + annotation into a Helm chart or kustomization so
+# it's reproducible. For first apply, kubectl is fine.
 
 apiVersion: v1
 kind: Pod
 metadata:
-  name: mandelflow-compute-frame-000
+  name: mandelflow-compute-range-0000-0029
   labels:
     app: mandelflow-compute
-    frame: "000"
+    range: "0000-0029"
 spec:
   serviceAccountName: compute-sa
   restartPolicy: Never
@@ -35,11 +38,13 @@ spec:
   containers:
     - name: compute
       image: REPLACE_ME-docker.pkg.dev/REPLACE_ME/mandelflow/compute:dev
-      command: ["python", "-m", "stages.s08_zoom_cloud.run"]
+      command: ["python", "-m", "stages.s09_zoom_fanout.run"]
       args:
-        - "--frame-index=0"
+        - "--mode=pod"
+        - "--frame-start=0"
+        - "--frame-end=30"
         - "--n-frames=120"
-        - "--resolution=720"
+        - "--resolution=1080"
         - "--max-iter=512"
         - "--output=gs://REPLACE_ME-mandelflow-zarr/runs/dev.zarr"
       resources:

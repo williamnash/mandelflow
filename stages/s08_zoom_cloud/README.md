@@ -1,148 +1,112 @@
-# Stage 08 — Cloud-distributed multi-frame zoom
+# Stage 08 — Cloud, single machine
 
-**Status: scaffold only.** This stage isn't runnable yet. The Terraform, Pod manifests, and `run.py` here are stubs that show the deployment shape; they'll need filling in before they touch real infrastructure.
+**Status: scaffold only.** Terraform skeleton + walkthrough; not provisioned, not pushed.
 
-s08 takes s07's multi-frame zoom and fans the frames across a Kubernetes cluster on GKE. Same kernel as s06 (and s07), same per-frame contract — what changes is the *executor*: each frame becomes one Pod on a GPU node, and the Pods write per-frame chunks to a single GCS-backed Zarr store. This is where Dask / Dagster's partition fan-out earns its keep — multi-machine throughput, not just multi-core.
+s08 is the smallest possible "run mandelflow in the cloud" deployment: one **GCE VM** with a T4 GPU, the project's existing Docker image running on it, output written to GCS. It teaches the credentials story, the container delivery path, and the GCS write semantics — without inheriting the operational weight of a Kubernetes cluster.
+
+If you've never deployed to a cloud GPU before, this is the right stage to start with. **s09** picks up the same pattern and fans frame ranges across multiple machines once single-machine throughput stops being enough.
+
+## Why a VM (and not GKE / Cloud Run / Vertex)
+
+| Option | What it adds | Why we skip at s08 |
+|---|---|---|
+| **GCE VM** ✓ | "Rent a computer with a GPU." | The simplest primitive. Same mental model as EC2 + GPU. |
+| GKE | Orchestrated containers, multi-Pod fan-out, autoscaling. | Cluster overhead isn't justified for one machine — that's s09. |
+| Cloud Run GPU | Serverless containers. | Newer feature, regional constraints; black-boxes the VM you'd otherwise see directly. |
+| Vertex AI Custom Job | Purpose-built ML batch. | Pulls in Vertex SDK + opinionated job spec; same teaching outcome as a VM at our scale. |
+
+The VM is *also* the cheapest thing to teach because the lifecycle is obvious: `terraform apply` → SSH in (or wait for the startup script) → render finishes → `terraform destroy`. No cluster control plane charges between apply and destroy.
 
 ## What gets provisioned
 
 | Resource | Purpose | Approx. cost |
 |---|---|---|
-| GKE **Standard** cluster | Control plane + node pools | ~$0.10/hr (zonal control plane) |
-| `n1-standard-4` + **1× T4 GPU** node pool | Where compute Pods run | ~$0.40/hr per node |
-| `e2-standard-2` node pool | Dagster control plane, IO Manager | ~$0.07/hr |
-| **Artifact Registry** repository | Hosts the mandelflow Docker image | pennies |
-| **GCS bucket** | The `gs://<bucket>/runs/<run_id>.zarr` artifact | pennies for typical runs |
-| **Workload Identity Federation** pool | OIDC trust between GitHub Actions and GCP | free |
-| **Service Account** + IAM bindings | Pod → GCS access via Workload Identity | free |
+| `n1-standard-4` GCE VM + **1× T4 GPU** | Runs the mandelflow container | ~$0.40/hr while running |
+| **GCS bucket** | Holds `runs/<id>.zarr` | pennies |
+| **Service account** + IAM bindings | VM → GCS access (no JSON keys) | free |
+| **Artifact Registry** (shared if you also do s09) | Hosts the Docker image | pennies |
 
-**Expected weekend cost: $8–12** if you tear down the GPU pool promptly. Use Autopilot — wait, no, *don't* use Autopilot. Use Standard. GKE Autopilot abstracts away the GPU node pool primitives this stage exists to teach (see `docs/GOTCHAS.md` #7).
-
-`terraform destroy` is the only safe path off the cost curve. **Set a phone alarm before `terraform apply`.**
+A 5-minute render → tear-down cycle costs **about $0.03**. Forgetting to tear down for a weekend costs ~$20. **Set a phone alarm before you stop watching the VM.**
 
 ## Credentials, in order
 
-> Your "Google API key" isn't what this needs. API keys authenticate client requests to public Google APIs (Maps, Translate, the Gemini API). For provisioning GCP infrastructure and running workloads in it you need different credential types — listed below in the order you'll use them.
+You only need two of the three credential paths s09 needs — VMs avoid the Workload-Identity-binding dance because they carry a service account directly.
 
 ### 1. Local Terraform / `gcloud` (you, on your laptop)
 
 ```bash
-gcloud auth login                         # interactive — opens browser
-gcloud auth application-default login     # for Terraform / Python SDKs
+gcloud auth login
+gcloud auth application-default login         # for Terraform
 gcloud config set project YOUR_PROJECT_ID
 ```
 
-This uses **your user identity**. Terraform reads Application Default Credentials (ADC) from `~/.config/gcloud/application_default_credentials.json`. No JSON keys to manage.
+ADC reads from `~/.config/gcloud/application_default_credentials.json`. No JSON keys to manage.
 
-### 2. CI / GitHub Actions → GCP (Workload Identity Federation)
+### 2. The VM → GCS (attached service account)
 
-The repo's `.github/workflows/deploy.yml` already expects WIF secrets (`GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_DEPLOY_SA`). The Terraform here provisions the WIF pool + provider + IAM bindings that trust the GitHub OIDC issuer. **No static service-account JSON keys** — GitHub mints short-lived tokens, GCP swaps them for impersonation of the deploy SA. See `docs/GOTCHAS.md` #6.
+The Terraform creates a GCP service account `mandelflow-vm@<project>.iam.gserviceaccount.com` with `roles/storage.objectAdmin` on the Zarr bucket, and **attaches it directly to the VM**. Anything running on the VM (your container, an SSH session) automatically inherits that identity via the **metadata server** — no JSON keys, no Workload Identity binding, no token exchange. Just `gcloud auth list` on the VM and the right principal is already active.
 
-### 3. GKE Pods → GCS (Workload Identity binding)
+> Your "Google API key" isn't what this needs. API keys authenticate client requests to public Google APIs (Maps, Gemini). For provisioning GCP infrastructure and running batch GPU work in it you use the two flows above — ADC for your laptop, attached SA for the VM. **Zero static credentials**, by design.
 
-The compute Pods need to read/write the Zarr store. They authenticate via **Workload Identity** — the Kubernetes Service Account `compute-sa` is bound to the GCP Service Account `mandelflow-compute@<project>.iam.gserviceaccount.com`, which has `roles/storage.objectAdmin` on the Zarr bucket. Pods get short-lived tokens from the GKE metadata server. **Still no JSON keys.**
-
-The whole stage runs on zero static credentials. Every long-lived secret is replaced by IAM bindings.
-
-## Deployment flow (when you come back to actually do this)
+## Deployment flow
 
 ```bash
-# 0. Prerequisites: a GCP project with billing enabled, you have Owner or
-#    sufficient IAM admin role on it.
+# 0. Prerequisites: GCP project with billing, T4 GPU quota in your region.
 
-# 1. Copy the example tfvars and fill it in
+# 1. Fill in tfvars (project_id, region, zone, bucket_name)
 cp stages/s08_zoom_cloud/terraform/example.tfvars stages/s08_zoom_cloud/terraform/terraform.tfvars
-# Edit project_id, region, github_repo, etc.
+# edit the file
 
-# 2. Provision the cluster + bucket + Artifact Registry + WIF
+# 2. Provision the VM + bucket + SA bindings
 cd stages/s08_zoom_cloud/terraform
 terraform init
-terraform plan -var-file=terraform.tfvars
-terraform apply -var-file=terraform.tfvars   # ~10 min for first apply
+terraform apply -var-file=terraform.tfvars   # ~2 min
 
-# 3. Capture outputs into GitHub secrets and shell env
-terraform output                              # check what's there
-gcloud container clusters get-credentials mandelflow --region <region>
-
-# 4. Build and push the image
+# 3. Build and push the Docker image to Artifact Registry
+#    (image is shared with s09 if you've done it before)
 docker buildx build --platform linux/amd64 \
   -t <region>-docker.pkg.dev/<project>/mandelflow/compute:dev .
 docker push <region>-docker.pkg.dev/<project>/mandelflow/compute:dev
 
-# 5. (Future) launch the Dagster job that materialises the iterations asset
-#    against the K8s executor. For now, submit individual Pods manually
-#    to validate the plumbing:
-kubectl apply -f stages/s08_zoom_cloud/k8s/compute-pod.yaml
+# 4. SSH onto the VM and run the container
+gcloud compute ssh mandelflow-vm --zone=<zone>
+# On the VM:
+docker run --gpus all \
+  -e PYTHONUNBUFFERED=1 \
+  <region>-docker.pkg.dev/<project>/mandelflow/compute:dev \
+  python -m stages.s08_zoom_cloud.run \
+    --n-frames 120 --resolution 1080 --max-iter 512 \
+    --output gs://<bucket>/runs/dev.zarr
 
-# 6. Verify chunks landed
-gsutil ls gs://<bucket>/runs/<run_id>.zarr/iterations/
+# 5. Pull results back
+gsutil -m cp -r gs://<bucket>/runs/dev.zarr ./
 
-# 7. TEAR IT DOWN
-cd stages/s08_zoom_cloud/terraform
+# 6. TEAR IT DOWN
 terraform destroy -var-file=terraform.tfvars
 ```
 
-## What lives in each subdirectory
+The startup script the VM gets includes the NVIDIA driver install — first boot takes ~3–5 minutes for that step before Docker can see the GPU. The driver state survives reboot; subsequent runs are immediate.
 
-```
-stages/s08_zoom_cloud/
-├── README.md          ← this file
-├── compute.py         ← re-exports s06's compute_frame (same kernel)
-├── run.py             ← driver sketch: build K8s Job per frame, await completion
-├── terraform/         ← infra-as-code; one .tf per resource type
-│   ├── main.tf
-│   ├── variables.tf
-│   ├── gke.tf
-│   ├── gcs.tf
-│   ├── artifact_registry.tf
-│   ├── workload_identity.tf
-│   ├── outputs.tf
-│   └── example.tfvars
-├── k8s/               ← Pod / Job manifests applied by `run.py` (or Dagster)
-│   └── compute-pod.yaml
-└── dev/               ← local plumbing tests against a `kind` cluster
-    └── kind-cluster.yaml
-```
+## How `run.py` differs from s07
 
-## Two paths to actually running this
+It barely differs. `run.py` is s07's exact loop — the canonical schedule, shared GL context across all frames, multi-frame Zarr writes — with **one change**: the output path can be a `gs://` URL. The xarray + zarr stack speaks GCS through `gcsfs` (already in `pyproject.toml` deps), so `xarray.to_zarr("gs://bucket/path.zarr", region=...)` works directly. No code change in `common/store.py` needed; the same `region` write API targets either filesystem.
 
-### Path A: Direct K8s Job submission (simpler — what `run.py` will sketch)
+For the standalone CLI, `--output gs://bucket/path.zarr` is the only deployment-aware change.
 
-For each frame index `k`, the driver builds a Pod spec, submits via `kubernetes` Python client, polls for completion, returns. No Dagster needed. Sufficient to validate the cluster + image + GCS write path end-to-end. This is what the local `kind` plumbing test in `dev/` will exercise.
+## What this stage doesn't (yet) do
 
-### Path B: Dagster K8s executor (the architectural target)
+- **MP4 stitching from the GCS Zarr.** `render/animation.py` reads via `xr.open_zarr` so it should work against `gs://` URLs too, but currently the local-development assumption is hard-coded. Small follow-up.
+- **Fan-out across machines.** That's s09's job and it builds directly on this stage.
+- **Cost telemetry.** The Terraform doesn't tag resources with cost-center labels. Add `labels = { stage = "s08", purpose = "mandelflow-demo" }` to the VM resource once you actually deploy.
 
-The `iterations` asset is partitioned by frame; Dagster's `k8s_job_executor` launches one Job per partition automatically. The asset graph in `orchestration/definitions.py` is unchanged from local Dagster runs — only the executor config and the IOManager change. Materialise via `dagster job execute` or the UI; chunks land in `gs://.../run.zarr` as Pods complete.
+## When to graduate to s09
 
-Path B is the real story but depends on `orchestration/definitions.py` existing and on the **`GCSIcechunkIOManager`** (called out as a known gap in `docs/DESIGN.md §11`). Falls back to raw Zarr region writes if icechunk integration proves heavier than expected.
+Single-VM s08 is right when:
+- Your render finishes in seconds-to-minutes on one T4.
+- You're iterating on the kernel and want a tight cycle.
+- Tearing down between runs is acceptable.
 
-## Known gaps before this stage runs
-
-In rough order of effort:
-
-1. **Project-level GCP setup.** Create the project, enable billing, enable the APIs Terraform will need (`container.googleapis.com`, `artifactregistry.googleapis.com`, `iam.googleapis.com`, `iamcredentials.googleapis.com`, `storage.googleapis.com`, `compute.googleapis.com`). This is a one-time ~10-min task.
-2. **Quota for T4 GPUs.** Default quota is often 0 in new projects. File a quota increase: `Compute Engine API → NVIDIA T4 GPUs` → 1+ in your region. Approval is usually same-day.
-3. **Fill in the Terraform variables.** `terraform/example.tfvars` has placeholders.
-4. **Build the Docker image.** Repo-root `Dockerfile` is already there; needs to push to Artifact Registry.
-5. **`orchestration/definitions.py`** for Path B (Dagster). Not blocking for Path A.
-6. **`GCSIcechunkIOManager`** for the parallel-write path. Or fall back to raw Zarr (single-writer-per-chunk via region writes, which we already have).
-
-The scaffolded files mark these with `# TODO(s08):` comments at the relevant spots.
-
-## What scaffolded *now* gives you
-
-A clear deployment roadmap and Terraform skeletons that already reflect the right shape:
-
-- Service accounts and Workload Identity bindings sketched.
-- GKE cluster + GPU node pool with the right machine type, taints, and tolerations.
-- GCS bucket with the right lifecycle (Standard storage, soft delete enabled).
-- Artifact Registry repository scoped to the project.
-
-Running `terraform plan` against a real project (with your variables filled in) should give a clean plan — though `apply` will reject anything that uses placeholder names until you customise.
-
-## Cost cautions (worth repeating)
-
-- **Cloud Load Balancers persist if you don't delete them.** ~$18/month each. None of the manifests here create one — Cloud Run for the viewer (s09) avoids this — but be vigilant.
-- **GPU nodes do not stop when idle.** They keep billing until the node pool is scaled to zero or deleted.
-- **GCS standard storage** is cheap but lifecycle to nearline / coldline after 30 days if you're keeping runs around.
-- **Always run `terraform destroy`** when you finish a session. Reapplying is cheap; an idle GPU pool overnight is not.
+Graduate to s09 when:
+- One T4's wall-clock becomes the bottleneck (e.g., 10k-frame zoom).
+- You need independent retries per frame range.
+- You want fan-out as the architectural lesson, not just throughput.

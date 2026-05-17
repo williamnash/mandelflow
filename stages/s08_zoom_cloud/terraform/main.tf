@@ -1,8 +1,9 @@
 # mandelflow stage 08 — Terraform root.
 #
-# Provisions everything needed to fan frame computation across a GKE cluster
-# and write per-frame chunks to GCS. See ../README.md for the deployment
-# walkthrough.
+# Provisions one GCE VM with a T4 GPU, a GCS bucket for outputs, and the
+# service account / IAM bindings that let the VM write to the bucket via
+# its attached identity (no JSON keys). See ../README.md for the full
+# deployment walkthrough.
 #
 # Usage:
 #   cp example.tfvars terraform.tfvars   # fill in your values
@@ -18,30 +19,21 @@ terraform {
       version = "~> 5.0"
     }
   }
-
-  # TODO(s08): swap to a GCS-backed remote backend once the bucket below exists,
-  # so state is shared between you and CI. For first apply, local backend is
-  # fine; create the bucket, then move state via `terraform init -migrate-state`.
-  # backend "gcs" {
-  #   bucket = "<project-id>-tfstate"
-  #   prefix = "stages/s08_zoom_cloud"
-  # }
 }
 
 provider "google" {
   project = var.project_id
   region  = var.region
+  zone    = var.zone
 }
 
-# Enable the APIs the rest of this configuration needs. Cheap and idempotent.
+# Enable the APIs the rest of this configuration needs. Idempotent.
 resource "google_project_service" "required_apis" {
   for_each = toset([
-    "container.googleapis.com",          # GKE
-    "artifactregistry.googleapis.com",   # Docker image repo
+    "compute.googleapis.com",            # GCE VM
     "iam.googleapis.com",                # service accounts
-    "iamcredentials.googleapis.com",     # WIF token exchange
     "storage.googleapis.com",            # GCS bucket
-    "compute.googleapis.com",            # node pool VMs
+    "artifactregistry.googleapis.com",   # Docker image repo (shared with s09)
   ])
   service            = each.value
   disable_on_destroy = false
