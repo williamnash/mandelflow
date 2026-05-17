@@ -1,0 +1,54 @@
+# Example Pod spec for one frame's compute job.
+#
+# Submit with: kubectl apply -f stages/s08_zoom_cloud/k8s/compute-pod.yaml
+# After it completes, the chunk lands at gs://<bucket>/runs/<run_id>.zarr/iterations/<frame>.0.0
+#
+# The KSA `compute-sa` must be annotated to impersonate the GCP service
+# account `mandelflow-compute@<project>.iam.gserviceaccount.com`. Terraform
+# binds the IAM side; the K8s side needs:
+#
+#   kubectl create serviceaccount compute-sa
+#   kubectl annotate serviceaccount compute-sa \
+#     iam.gke.io/gcp-service-account=mandelflow-compute@<project>.iam.gserviceaccount.com
+#
+# TODO(s08): bake the KSA + annotation into a Helm chart or kustomization
+# so it's reproducible. For first apply, kubectl is fine.
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mandelflow-compute-frame-000
+  labels:
+    app: mandelflow-compute
+    frame: "000"
+spec:
+  serviceAccountName: compute-sa
+  restartPolicy: Never
+
+  # GPU pool taint — see terraform/gke.tf
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Equal
+      value: present
+      effect: NoSchedule
+
+  containers:
+    - name: compute
+      image: REPLACE_ME-docker.pkg.dev/REPLACE_ME/mandelflow/compute:dev
+      command: ["python", "-m", "stages.s08_zoom_cloud.run"]
+      args:
+        - "--frame-index=0"
+        - "--n-frames=120"
+        - "--resolution=720"
+        - "--max-iter=512"
+        - "--output=gs://REPLACE_ME-mandelflow-zarr/runs/dev.zarr"
+      resources:
+        limits:
+          nvidia.com/gpu: 1
+          memory: "4Gi"
+        requests:
+          cpu: "1"
+          memory: "2Gi"
+      env:
+        - name: PYTHONUNBUFFERED
+          value: "1"

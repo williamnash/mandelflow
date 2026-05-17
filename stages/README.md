@@ -21,7 +21,7 @@ Wall-clock seconds at `resolution=2048`, `max_iter=512`, canonical view
 | [`s05_gpu_torch`](s05_gpu_torch/) | 1.7s (MPS) | 10.4× | PyTorch on CUDA / MPS, float32 throughout — slower than s03/s04 on Apple integrated GPU; expected to be much faster on CUDA |
 | [`s06_gpu_shader`](s06_gpu_shader/) | **0.06s (MPS)** | **295×** | GLSL fragment shader; entire iteration loop in one GPU dispatch — barely scales with image size, unlocks deep zoom |
 | [`s07_zoom_local`](s07_zoom_local/) | 1.36s for 120 frames @ 720² | 11.3 ms/frame | Multi-frame zoom on one machine using s06's kernel with shared GL context; produces the first real zoom MP4 |
-| `s08_zoom_cloud` | — | — | Dagster K8s executor on GKE writing to GCS |
+| [`s08_zoom_cloud`](s08_zoom_cloud/) | scaffold | — | Frame-per-Pod fan-out on GKE writing to GCS; Terraform + K8s manifests scaffolded, not yet runnable |
 | `s09_viewer_fastapi` | — | — | Read service over precomputed Zarrs (not a compute stage) |
 
 ## Which stage should I use?
