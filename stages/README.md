@@ -13,11 +13,11 @@ Wall-clock seconds at `resolution=2048`, `max_iter=512`, canonical view
 
 | Stage | Time | vs s00 | Technique |
 |---|---|---|---|
-| [`s00_naive`](s00_naive/) | 17.68s | 1× | Pure Python triple loop |
-| [`s01_numpy`](s01_numpy/) | 10.87s | 1.6× | Vectorised numpy with mask-tracked escapes |
-| [`s02_numba`](s02_numba/) | 1.14s | 15.5× | `@njit` over the per-pixel loop |
-| [`s03_numba_opt`](s03_numba_opt/) | 0.05s | **354×** | `@vectorize(parallel, fastmath)` + cardioid/period-2 early exits |
-| [`s04_dask_local`](s04_dask_local/) | 3.00s | 5.9× | Dask `LocalCluster`; tile fan-out across worker processes (slower than s03 by design — same shape that scales to multi-machine) |
+| [`s00_naive`](s00_naive/) | 17.72s | 1× | Pure Python triple loop |
+| [`s01_numpy`](s01_numpy/) | 10.79s | 1.6× | Vectorised numpy with mask-tracked escapes |
+| [`s02_numba`](s02_numba/) | 1.13s | 15.7× | `@njit` over the per-pixel loop — kills interpreter overhead |
+| [`s03_numba_opt`](s03_numba_opt/) | 0.12s | 148× | `@vectorize` + fastmath + cardioid/period-2 early exits (single-threaded — kernel-level wins only) |
+| [`s04_dask_local`](s04_dask_local/) | **0.07s** | **253×** | s03's kernel fanned across Dask worker processes — same shape that scales to multi-machine |
 | `s05_gpu_torch` | — | — | PyTorch on CUDA / MPS |
 | `s06_gpu_shader` | — | — | ModernGL fragment shader on GPU |
 | `s07_zoom_dask` | — | — | Unlocks the frame dimension; many frames in parallel |

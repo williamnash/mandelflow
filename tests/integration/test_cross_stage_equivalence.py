@@ -30,11 +30,11 @@ _PARAMS = dict(
 EXACT_STAGES = [
     pytest.param(s01_compute, id="s01_numpy"),
     pytest.param(s02_compute, id="s02_numba"),
-    pytest.param(s04_compute, id="s04_dask_local"),
 ]
 
 FASTMATH_STAGES = [
     pytest.param(s03_compute, id="s03_numba_opt"),
+    pytest.param(s04_compute, id="s04_dask_local"),
 ]
 
 

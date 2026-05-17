@@ -1,20 +1,23 @@
-"""Stage 04: Dask intra-frame tile fan-out.
+"""Stage 04: Dask intra-frame tile fan-out, using s03's optimised kernel.
 
-Tiles the image into `n_tiles x n_tiles` blocks and dispatches each
-block as a `dask.delayed` task. The active Dask scheduler decides
-whether tiles run sequentially (synchronous scheduler — the default
-for unit tests) or across worker processes (when `run.py` opens a
-`Client(LocalCluster())` context).
+Each tile is dispatched as a `dask.delayed` task; an active Dask
+`Client` (set up by `run.py`) fans tiles across worker *processes*.
+Per-tile compute calls s03's single-threaded JIT kernel, so each
+worker process does CPU-saturated math without contending with
+sibling workers for in-process threads.
 
-The per-tile kernel inlines s01's vectorised-numpy logic. We pass
-each tile a *slice* of the global linspace rather than re-deriving its
-own linspace from centre/width — that keeps s04 bit-identical to s01
-(same float discretisation, same escape counts).
+Story:
+  s02  →  s03: kernel-level wins (fastmath, early exits, etc.)
+  s03  →  s04: parallelism — same kernel, fan across worker processes.
 
-The point of this stage is the architecture, not the wall-clock number.
-s03's intra-process parallel JIT will beat s04 on a single laptop;
-s04's process-based fan-out is the pattern that scales to multiple
-machines in stage 07 and onward.
+The active Dask scheduler decides whether tiles run sequentially
+(synchronous scheduler — the default for unit tests) or across worker
+processes (when `run.py` opens a `Client(LocalCluster())` context).
+
+Tiles receive *slices* of the global linspace rather than re-deriving
+their own linspace from centre+width — that keeps s04 bit-identical
+to s03's per-pixel output (same float discretisation, same escape
+counts).
 """
 
 from __future__ import annotations
@@ -23,20 +26,13 @@ import dask
 import numpy as np
 
 from common.store import ITERATIONS_DTYPE
+from stages.s03_numba_opt.compute import _instability
 
 
 def _compute_tile(x_slice: np.ndarray, y_slice: np.ndarray, max_iter: int) -> np.ndarray:
     X, Y = np.meshgrid(x_slice, y_slice)
     C = X + 1j * Y
-    Z = np.zeros_like(C)
-    out = np.full(C.shape, max_iter, dtype=ITERATIONS_DTYPE)
-    mask = np.ones(C.shape, dtype=bool)
-    for k in range(max_iter):
-        Z[mask] = Z[mask] * Z[mask] + C[mask]
-        escaped = np.abs(Z) > 2
-        out[escaped & mask] = k
-        mask &= ~escaped
-    return out
+    return _instability(C, max_iter)
 
 
 def compute_frame(
