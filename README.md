@@ -66,6 +66,8 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for why Zarr, why xarray, why Dagster, wh
 
 **Reproducibility contract:** every stage marked ✓ must run from `uv sync` followed by `uv run python -m stages.<stage_id>.run` on a stock laptop. Stages requiring GPU or GCP credentials must fail with a single clear line naming the missing prerequisite — never silently, never with a stack trace.
 
+For the per-stage scaling story — what each step is supposed to teach, what's fair to compare, and the measurement methodology — see [`docs/SCALING.md`](docs/SCALING.md).
+
 ## Quickstart
 
 ```bash
