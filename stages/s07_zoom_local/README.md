@@ -1,6 +1,6 @@
 # Stage 07 — Local multi-frame zoom
 
-**120 frames at 720×720 in 1.36s** on Apple MPS (~11.3 ms/frame). The first multi-frame artifact in the repo: a `(120, 720, 720)` Zarr and the MP4 stitched from it.
+**120 frames at 720×720 in ~1.4s** on Apple MPS (~11.5 ms/frame), zooming 3,500× from the canonical Mandelbrot view into the Seahorse Valley spiral at `(-0.7435, 0.1314)`. The first multi-frame artifact in the repo: a `(120, 720, 720)` Zarr and the MP4 stitched from it.
 
 s07 isn't a new kernel. It's the **orchestration** stage that unlocks the frame dimension on a single machine.
 
@@ -10,7 +10,9 @@ Four things that didn't exist before this stage:
 
 1. **Multi-frame Zarr writes.** Stages 00–06 always wrote `frame=0` into a `(1, H, W)` store. s07 builds an `(N, H, W)` store and uses the region-write pattern from `common/store.py` properly for the first time — one chunk per frame, per-frame metadata (`center_re`, `center_im`, `width`) populated as we go.
 
-2. **The canonical zoom schedule** (`common/schedule.py`). Maps `frame_index → (center_re, center_im, width)` along a **geometric zoom toward Seahorse Valley** (`-0.745, 0.113`). Width shrinks uniformly in log-space (so the visual zoom rate is constant), and the centre walks linearly from the wide canonical view to the target. Frame 0 = the canonical full view; frame N-1 = deep zoom at width 1e-5.
+2. **The canonical zoom schedule** (`common/schedule.py`). Maps `frame_index → (center_re, center_im, width)` along a **geometric zoom toward a Seahorse Valley spiral** at `(-0.7435, 0.1314)`. Width shrinks uniformly in log-space (so the visual zoom rate is constant), and the centre walks linearly from the wide canonical view to the target. Frame 0 = the canonical full Mandelbrot; frame N-1 = deep zoom at width 1e-3 (3,500× magnification).
+
+   The target and final width are tuned together: deeper zooms tend to land *inside* the set with boundary detail at the frame edge — not what a zoom video wants. The current settings keep the spiral feature centred on the final frame.
 
 3. **Shared GL context across frames.** s06's `compute_frame` gained an optional `ctx=` kwarg. s07's `run.py` creates the GL context **once**, passes it into every per-frame call, and releases it only at the end. Without this, each frame would pay ~200ms of pygame + moderngl setup; the 120-frame run would take ~25 seconds of pure overhead. With the shared context, that overhead is paid once total.
 
@@ -35,7 +37,7 @@ The per-frame contract is unchanged — s07 just uses s06's kernel. Everything t
 ## Perf: amortised setup is everything
 
 ```
-120 frames in 1.36s   (11.3 ms/frame)
+120 frames in ~1.4s   (11.5 ms/frame)
 ```
 
 Compared to s06's standalone ~60ms per frame (which includes context teardown each call), the shared-context loop is **about 5× faster per frame**. The saving is almost entirely GL context lifecycle.
