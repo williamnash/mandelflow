@@ -1,0 +1,17 @@
+# Local `kind` cluster for stage-08 plumbing tests.
+#
+# CPU-only — Apple Silicon's GPU is not exposed to Docker Desktop on Mac,
+# and `kind` doesn't currently support GPU passthrough on macOS regardless.
+# Use this cluster to validate Dagster K8s executor + IOManager wiring,
+# pod specs, and RBAC — NOT for perf testing the actual compute.
+#
+# Spin up:   kind create cluster --config stages/s08_zoom_cloud/dev/kind-cluster.yaml
+# Tear down: kind delete cluster --name mandelflow-dev
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: mandelflow-dev
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker

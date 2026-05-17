@@ -1,0 +1,66 @@
+name: PR checks
+
+on:
+  pull_request:
+    branches: [main]
+
+# Most jobs are gated `if: false` until their prerequisites land in the repo
+# (uv.lock, orchestration/definitions.py, terraform files, stage tests).
+# Remove the gate per job as each becomes meaningful.
+
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/ruff-action@v1
+        with:
+          args: "check ."
+
+  pytest:
+    runs-on: ubuntu-latest
+    if: false  # enable once uv.lock is committed AND stage tests exist
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.11.x"
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Pytest (CPU stages only)
+        run: |
+          uv run pytest \
+            stages/s00_naive stages/s01_numpy stages/s02_numba \
+            stages/s03_numba_opt stages/s04_dask_local stages/s07_zoom_dask -v
+
+  dagster-validate:
+    runs-on: ubuntu-latest
+    if: false  # enable once orchestration/definitions.py exists
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.11.x"
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Dagster definitions load
+        run: uv run dagster definitions validate -m orchestration.definitions
+
+  terraform-validate:
+    runs-on: ubuntu-latest
+    if: false  # enable once stages/s08_zoom_cloud/terraform/ has .tf files
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform -chdir=stages/s08_zoom_cloud/terraform fmt -check
+      - run: terraform -chdir=stages/s08_zoom_cloud/terraform init -backend=false
+      - run: terraform -chdir=stages/s08_zoom_cloud/terraform validate
+
+  docker-build:
+    runs-on: ubuntu-latest
+    if: false  # enable once uv.lock is committed
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build (no push)
+        run: docker buildx build --platform linux/amd64 --load -t mandelflow:pr .

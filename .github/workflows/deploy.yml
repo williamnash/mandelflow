@@ -1,0 +1,38 @@
+name: Deploy viewer to Cloud Run
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "stages/s09_viewer_fastapi/**"
+      - "common/**"
+      - "render/**"
+      - ".github/workflows/deploy.yml"
+
+# Stub — fill in once Workload Identity Federation is set up and the
+# viewer Dockerfile lands in stages/s09_viewer_fastapi/.
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: false  # remove this once configured
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SA }}
+      - name: Build and push
+        run: |
+          gcloud auth configure-docker ${{ secrets.GCP_REGION }}-docker.pkg.dev
+          docker build -t ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/mandelflow/viewer:${{ github.sha }} stages/s09_viewer_fastapi
+          docker push ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/mandelflow/viewer:${{ github.sha }}
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy mandelflow-viewer \
+            --image ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/mandelflow/viewer:${{ github.sha }} \
+            --region ${{ secrets.GCP_REGION }} \
+            --allow-unauthenticated
