@@ -36,12 +36,12 @@ KERNEL_STAGES = [
 ]
 
 # Predicted multi-frame throughput (frames/s wall) and total
-# compute-seconds at 1080p, canonical zoom schedule. None = placeholder
-# stage with no implementation yet.
+# compute-seconds at 1080p, canonical zoom schedule. None = stage not
+# implemented yet (rendered as a hatched placeholder bar).
 ORCH_STAGES = [
     ("s07\nlocal zoom",   2.0,   100,    "1 GPU"),
     ("s08\ncloud CPU",    1.0,   2_000,  "1 VM × 8 cores"),
-    ("s09\nfanout CPU",   None,  None,   "placeholder"),
+    ("s09\nfanout CPU",   3.0,   1_500,  "8 tasks × 2 vCPU"),
     ("s10\ncloud GPU",    None,  None,   "placeholder"),
     ("s11\nGKE GPU",      10.0,  6_000,  "4 pods × T4"),
 ]
@@ -188,8 +188,8 @@ def orchestration_story_chart() -> Path:
     ax2.set_ylim(10, 1e5)
 
     fig.suptitle(
-        "Orchestration story: same shader, three deployment shapes\n"
-        "1080p canonical zoom; placeholders shown for s09/s10",
+        "Orchestration story: same shader, four deployment shapes\n"
+        "1080p canonical zoom; s10 hatched as placeholder (GCP-quota blocked)",
         y=1.02,
     )
     fig.text(

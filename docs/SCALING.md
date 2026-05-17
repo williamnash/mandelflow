@@ -44,7 +44,7 @@ The same data as a speedup bar chart against the naive baseline. Useful for the 
 
 ![Predicted orchestration scaling, s07 → s11](../bench/results/predicted_orchestration_story.svg)
 
-The orchestration story has two axes that move in opposite directions: wall-time *frames/s* (left) goes up with parallelism, while total *compute-seconds consumed* (right, log scale) also goes up — fan-out trades total cost for wall time. s09 and s10 are hatched placeholders; the gap is the point.
+The orchestration story has two axes that move in opposite directions: wall-time *frames/s* (left) goes up with parallelism, while total *compute-seconds consumed* (right, log scale) also goes up — fan-out trades total cost for wall time. s10 is a hatched placeholder (GCP-quota blocked); the gap is the point.
 
 ### Predicted numbers
 
@@ -59,7 +59,7 @@ The orchestration story has two axes that move in opposite directions: wall-time
 | 06 | `s06_gpu_shader` | 16000² × 1 | GLSL fragment shader; entire iteration loop on-GPU | Fragment shader throughput; one draw call per frame | ~100 ms once the GL context is warm | Per-iteration Python dispatch goes to zero — the win that unlocks deep zoom |
 | 07 | `s07_zoom_local` | 100 frames × 1080p | s06 in a Python loop, single GL context reused | Readback to CPU + Zarr write per frame; GL context cost amortised over all frames | ~30–60 s end-to-end | First multi-frame artifact; teaches context amortisation |
 | 08 | `s08_zoom_cloud_cpu` | 200 frames × 1080p | s04 kernel on a single GCE VM, output to GCS | Single-VM throughput + network I/O to GCS | ~2–5 min end-to-end | Same kernel, different infrastructure |
-| 09 | `s09_zoom_fanout_cpu` | 1000 frames × 1080p | *(placeholder)* | Job scheduling overhead vs frame-batch size | TBD | Multi-machine fan-out on CPU |
+| 09 | `s09_zoom_fanout_cpu` | 1000 frames × 1080p | Cloud Run Jobs: N parallel tasks, each running s03's single-thread numba kernel on its slice of the schedule | Cold-start (~10–20 s per task) amortised over per-task frame batch; icechunk commit cadence | tens of seconds wall for ~hundred frames at 8 tasks; minutes at the 1080p target with proportionally more tasks | First multi-machine fan-out; first concurrent-writer storage scenario |
 | 10 | `s10_zoom_cloud_gpu` | 200 frames × 1080p | *(placeholder, GCP-quota blocked)* | Cloud GPU dispatch + GCS egress | TBD | s06 in the cloud, single VM |
 | 11 | `s11_zoom_fanout_gpu` | 1000 frames × 1080p | s06 in a Python loop per pod, N pods on GKE, icechunk-backed Zarr in GCS | Pod cold-start amortised over per-pod frame batches; icechunk commit cadence | TBD; minutes of wall time, hours of GPU-time | Distributed GPU; first stage where the *write path* (icechunk) is load-bearing |
 | 12 | `s12_viewer_fastapi` | reads precomputed Zarr | FastAPI tile + frame PNG endpoints | xarray open + chunk read; PNG encode | sub-100 ms per request (cold tile) | Read service, not a compute stage |
@@ -84,9 +84,17 @@ The table above is the headline. Below is the intuition each step is supposed to
 
 **s07 → s08 — same kernel, different infrastructure.** The compute kernel does not change. What changes is where the bytes land: GCS instead of the local filesystem. The teaching point is the *zero-diff promise* of the Zarr-as-data-product architecture — `to_zarr("gs://bucket/run.zarr")` is the only change. New costs: network egress from the VM to GCS, single-VM throughput cap.
 
-**s08 → s09 — fan-out, CPU.** Frame ranges fan across multiple machines. The interesting question is amortisation: a Cloud Run Job takes ~10 s to cold-start; assigning one frame per task burns 10 s of scheduling for ~1 s of compute. Batch ≈ 10–100 frames per task to keep useful compute > overhead.
+**s08 → s09 — fan-out, CPU.** Cloud Run Jobs dispatches N parallel tasks; each runs s03's single-thread numba kernel on its slice of the schedule (e.g. task 3 of 8 with 120 frames → frames 45..60). Three things matter:
 
-**s08/s09 → s10/s11 — GPU in the cloud.** Same fan-out story with GPU per node. The new constraint is icechunk: parallel writers must coordinate through icechunk sessions or chunk writes corrupt. The `IcechunkFrameIOManager` in `orchestration/definitions.py` handles this; the teaching point is that storage-side transactionality is what makes the fan-out architecture work.
+- **The parallelism unit is task count, not per-task threads.** Each task gets 2 vCPUs by default — adding s04's Dask intra-frame fan-out on top would launch worker processes per task with no useful speedup. The kernel choice is deliberate.
+- **Cold-start amortisation.** A Cloud Run task cold-starts in ~10–20 s. One frame per task wastes 10 s of scheduling per 1 s of compute; batch ~10–100 frames per task so useful work dominates.
+- **icechunk is the load-bearing piece.** Concurrent writers to the same Zarr need transactional semantics. Raw Zarr's chunk-level promise ("trust no two workers touch the same chunk") is technically satisfied by our frame-aligned chunks but breaks under any retry or restart. Session-based icechunk commits merge cleanly when tasks modify disjoint frame regions, and the commit log of `main` is the data lineage.
+
+This is the first stage where the *storage engine* (not just the URL) is part of the scaling story.
+
+**s09 → s11 — fan-out, GPU.** Same fan-out story, GPU per node, GKE pods instead of Cloud Run tasks. Two new constraints over s09: (a) pod cold-start is closer to 25 s with a GPU pull, so the per-pod frame batch wants to be larger; (b) `IcechunkFrameIOManager` in `orchestration/definitions.py` (the same one s09 uses, just configured for GKE) now coordinates writes from pods that may be in different zones. The asset graph is literally identical between s09 and s11 — only the Dagster executor (`k8s_cpu` vs `k8s_gpu`) and the kernel choice change. That's the whole point of the env-var dimensions added in `orchestration/definitions.py`.
+
+**s10 — single cloud VM with a GPU.** Placeholder, GCP-quota blocked. When unblocked, it's s06's shader on a single GCE GPU VM, output to GCS — the GPU analogue of s08.
 
 **s11 → s12 — read service, not compute.** The viewer is bandwidth-bound, not compute-bound. Latency = `xarray.open_zarr` + chunk fetch + PNG encode. Caching matters more than CPU. Out of scope: on-demand rendering of arbitrary new regions (would require a long-lived GL context per process; see `DESIGN.md` §11).
 
