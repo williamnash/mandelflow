@@ -38,9 +38,9 @@ variable "gpu_machine_type" {
 }
 
 variable "gpu_node_count" {
-  description = "Number of GPU nodes. 1 is fine for demo; scale up only for real fan-out."
+  description = "Number of GPU nodes. 0 (the s09 default) skips the GPU pool entirely; s11 sets this >= 1."
   type        = number
-  default     = 1
+  default     = 0
 }
 
 variable "bucket_name" {

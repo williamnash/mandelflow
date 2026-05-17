@@ -1,6 +1,6 @@
-# GKE Standard cluster with two node pools:
-# - A small default CPU pool for Dagster control plane / IO managers / scheduling
-# - A GPU pool with T4s for the per-frame compute Pods
+# GKE Standard cluster with a CPU node pool (always created) and an optional
+# GPU node pool. s09 uses the CPU pool only; s11 sets `gpu_node_count > 0` to
+# add T4-equipped nodes for the GPU-kernel Pods.
 #
 # We use Standard (not Autopilot) on purpose — Autopilot abstracts away the
 # node-pool primitives, GPU taints, and Workload Identity wiring that this
@@ -50,7 +50,12 @@ resource "google_container_node_pool" "cpu_pool" {
 
 # GPU pool. Zonal (T4s are zonal resources). Tainted so only GPU-tolerant
 # Pods land here — the compute Pods spec includes the matching toleration.
+#
+# Conditional: when `gpu_node_count == 0` (s09 default) the pool is not
+# created, so the cluster carries no GPU cost. s11 sets the var to >= 1.
 resource "google_container_node_pool" "gpu_pool" {
+  count = var.gpu_node_count > 0 ? 1 : 0
+
   name       = "gpu-pool"
   cluster    = google_container_cluster.mandelflow.id
   location   = var.zone
@@ -80,7 +85,7 @@ resource "google_container_node_pool" "gpu_pool" {
     ]
   }
 
-  # TODO(s11): autoscaling block. For demo, fixed `var.gpu_node_count` is simpler.
+  # TODO: autoscaling block. For demo, a fixed `var.gpu_node_count` is simpler.
   # For real batch fan-out, set min_node_count=0 and let cluster-autoscaler
   # scale to zero between runs.
 }

@@ -9,8 +9,11 @@ cluster_name = "mandelflow"
 github_owner = "your-github-username"
 github_repo  = "mandelflow"
 
-# Must be globally unique. Convention: <project_id>-mandelflow-zarr
+# Bucket is owned by s08's terraform; this is a data-source lookup.
+# Set to the same value used in stages/s08_zoom_cloud_cpu/terraform/terraform.tfvars.
 bucket_name = "your-gcp-project-id-mandelflow-zarr"
 
+# Default 0 = CPU-only cluster (s09).
+# Set to 1+ to add the T4 GPU pool (s11). T4 quota in `zone` is required.
+gpu_node_count   = 0
 gpu_machine_type = "n1-standard-4"
-gpu_node_count   = 1
