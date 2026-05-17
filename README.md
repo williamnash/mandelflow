@@ -59,7 +59,7 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for why Zarr, why xarray, why Dagster, wh
 | 06 | `s06_gpu_shader` | GLSL via ModernGL (EGL on Linux, hidden window on macOS) | Raw Zarr (local FS) | 1 frame, 16000×16000 | needs OpenGL 4.1+ GPU |
 | 07 | `s07_zoom_local` | Multi-frame zoom on one machine using s06's kernel with shared GL context | **icechunk** (local FS) | 100 frames, 1080p | needs OpenGL 4.1+ GPU |
 | 08 | `s08_zoom_cloud_cpu` | Single GCE VM, CPU kernel (s03); s07's loop, output to GCS | Zarr in GCS | 200 frames, 1080p | needs GCP creds |
-| 09 | `s09_zoom_fanout_cpu` | Multi-machine CPU fan-out (Cloud Run Jobs likely) — placeholder | Zarr in GCS | 1000 frames, 1080p | (not yet built) |
+| 09 | `s09_zoom_fanout_cpu` | Cloud Run Jobs CPU fan-out (N parallel tasks × s03 numba kernel) | **icechunk** in GCS | 1000 frames, 1080p | needs GCP creds |
 | 10 | `s10_zoom_cloud_gpu` | Single cloud VM with a GPU, s06 kernel — placeholder (GCP quota blocked) | Zarr in GCS | 200 frames, 1080p | (not yet built) |
 | 11 | `s11_zoom_fanout_gpu` | GKE multi-Pod fan-out, frame range per Pod | **icechunk** in GCS | 1000 frames, 1080p | needs GCP creds |
 | 12 | `s12_viewer_fastapi` | FastAPI tile server over precomputed Zarrs (frame PNGs + slippy-map tiles) | reads either backend | – | ✓ (CPU-only) |

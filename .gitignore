@@ -40,3 +40,4 @@ kubeconfig
 .DS_Store
 .idea/
 .vscode/
+.claude/
