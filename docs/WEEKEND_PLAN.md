@@ -22,7 +22,7 @@ Land these before kicking off Saturday:
 | `render/frame.py` + `animation.py` | 1h | Read a Zarr → PNG / MP4 via `ffmpeg` subprocess. Pure functions; called by Dagster asset *and* by stage `run.py` for standalone use. |
 | Dagster orchestration | 2h | `iterations` asset partitioned by frame; `frame_pngs` and `animation_mp4` downstream. `LocalZarrIOManager`. `dagster dev -m orchestration.definitions` shows the asset graph and materialises. |
 | Stage 04 (dask-local) | 1h | Same asset, Dask backend for one big single-frame render. Fans tiles across cores locally. |
-| Stage 07 (zoom-dask) | 1h | Unlock the frame dimension. End-of-day deliverable: a real zoom animation rendered from a real Zarr via the Dagster asset graph. |
+| Stage 07 (zoom-local) | 1h | Unlock the frame dimension. Multi-frame zoom on one machine using s06's kernel with a shared GL context. End-of-day deliverable: a real zoom animation rendered from a real multi-frame Zarr. |
 
 ## Sunday — cloud + viewer (~9 hrs)
 

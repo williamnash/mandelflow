@@ -32,7 +32,7 @@ Run directly:
 ```bash
 uv run python -m stages.s00_naive.run
 uv run python -m stages.s04_dask_local.run
-uv run python -m stages.s07_zoom_dask.run
+uv run python -m stages.s07_zoom_local.run
 ```
 
 Or via the Dagster UI:

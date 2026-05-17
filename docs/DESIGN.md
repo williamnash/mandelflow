@@ -153,7 +153,8 @@ Heuristics in roughly decreasing order of decisiveness:
 | s04 dask_local | Many CPU cores, intra-frame parallelism, single-machine | Single-frame work too small to amortise Dask overhead |
 | s05 gpu_torch | Dense per-element math, no per-element branching, CUDA available | Per-op dispatch dominates (integrated GPU + tight loop) |
 | s06 gpu_shader | Deep zoom needing long iteration in one kernel, GPU available | Infrastructure cost (EGL setup, container, GPU node) not justified by single-frame need |
-| s07 / s08 zoom_dask | Many frames, embarrassingly parallel | Per-frame work so cheap that scheduling cost dominates |
+| s07 zoom_local | Many frames on one machine (e.g. laptop with one GPU) | Cluster-grade scale; bottlenecked by single-machine throughput |
+| s08 zoom_cloud | Many frames across many machines (GKE) | Per-frame work so cheap that K8s scheduling cost dominates |
 | s09 viewer_fastapi | Serving precomputed regions over the network | Computing new regions on demand (deliberately out of scope) |
 
 ### The general principle

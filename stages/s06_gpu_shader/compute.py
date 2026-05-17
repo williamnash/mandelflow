@@ -94,10 +94,21 @@ def compute_frame(
     width: float,
     resolution: int,
     max_iter: int,
+    ctx=None,
 ) -> np.ndarray:
+    """Render one frame of escape iteration counts via the fragment shader.
+
+    `ctx` is an optional moderngl context. When omitted (single-call use
+    from a per-frame CLI), the context is created and torn down here.
+    For multi-frame use (s07's zoom loop), pass a pre-built context to
+    skip the ~200ms setup-per-call overhead — see `make_offscreen_context`
+    in `render/gl_context.py`.
+    """
     import moderngl
 
-    ctx = make_offscreen_context(1, 1)
+    own_ctx = ctx is None
+    if own_ctx:
+        ctx = make_offscreen_context(1, 1)
     try:
         program = ctx.program(
             vertex_shader=_VERTEX_SHADER,
@@ -129,9 +140,10 @@ def compute_frame(
         vbo.release()
         program.release()
     finally:
-        ctx.release()
-        if sys.platform == "darwin":
-            import pygame
-            pygame.display.quit()
+        if own_ctx:
+            ctx.release()
+            if sys.platform == "darwin":
+                import pygame
+                pygame.display.quit()
 
     return arr.astype(ITERATIONS_DTYPE)

@@ -57,7 +57,7 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for why Zarr, why xarray, why Dagster, wh
 | 04 | `s04_dask_local` | Dask `LocalCluster`, tiled across cores | Raw Zarr (local FS) | 1 frame, 10000×10000 | ✓ |
 | 05 | `s05_gpu_torch` | PyTorch CUDA / MPS | Raw Zarr (local FS) | 1 frame, 16000×16000 | needs CUDA or MPS |
 | 06 | `s06_gpu_shader` | GLSL via ModernGL (EGL on Linux, hidden window on macOS) | Raw Zarr (local FS) | 1 frame, 16000×16000 | needs OpenGL 4.1+ GPU |
-| 07 | `s07_zoom_dask` | Frame dimension fanned across Dask workers | **icechunk** (local FS) | 100 frames, 1080p | ✓ |
+| 07 | `s07_zoom_local` | Multi-frame zoom on one machine using s06's kernel with shared GL context | **icechunk** (local FS) | 100 frames, 1080p | needs OpenGL 4.1+ GPU |
 | 08 | `s08_zoom_cloud` | Dagster K8s executor | **icechunk** in GCS | 1000 frames, 1080p | needs GCP creds |
 | 09 | `s09_viewer_fastapi` | FastAPI tile server over precomputed Zarrs (frame PNGs + slippy-map tiles) | reads either backend | – | ✓ (CPU-only) |
 
@@ -100,7 +100,7 @@ mandelflow/
 │   ├── s04_dask_local/
 │   ├── s05_gpu_torch/
 │   ├── s06_gpu_shader/
-│   ├── s07_zoom_dask/
+│   ├── s07_zoom_local/
 │   ├── s08_zoom_cloud/      # + terraform/, k8s/, Dagster K8s executor config
 │   └── s09_viewer_fastapi/  # FastAPI tile server (read-only)
 ├── orchestration/           # Dagster: assets, frame partitions, IOManagers, resources

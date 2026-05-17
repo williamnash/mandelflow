@@ -20,7 +20,7 @@ Wall-clock seconds at `resolution=2048`, `max_iter=512`, canonical view
 | [`s04_dask_local`](s04_dask_local/) | **0.07s** | **253×** | s03's kernel fanned across Dask worker processes — same shape that scales to multi-machine |
 | [`s05_gpu_torch`](s05_gpu_torch/) | 1.7s (MPS) | 10.4× | PyTorch on CUDA / MPS, float32 throughout — slower than s03/s04 on Apple integrated GPU; expected to be much faster on CUDA |
 | [`s06_gpu_shader`](s06_gpu_shader/) | **0.06s (MPS)** | **295×** | GLSL fragment shader; entire iteration loop in one GPU dispatch — barely scales with image size, unlocks deep zoom |
-| `s07_zoom_dask` | — | — | Unlocks the frame dimension; many frames in parallel |
+| [`s07_zoom_local`](s07_zoom_local/) | 1.36s for 120 frames @ 720² | 11.3 ms/frame | Multi-frame zoom on one machine using s06's kernel with shared GL context; produces the first real zoom MP4 |
 | `s08_zoom_cloud` | — | — | Dagster K8s executor on GKE writing to GCS |
 | `s09_viewer_fastapi` | — | — | Read service over precomputed Zarrs (not a compute stage) |
 
@@ -34,7 +34,8 @@ The wall-clock champion on a laptop is **s04 dask_local**, but the right pick de
 | Single-frame compute embedded in another Python script (no cluster) | **s03 numba_opt** |
 | Bit-faithful baseline for verification or debugging | **s00 naive** |
 | Deep zoom past float32 precision (~10⁶) | s06 gpu_shader |
-| Many frames computed across many machines | s07 zoom_dask / s08 zoom_cloud |
+| Many frames on a single machine (laptop) | s07 zoom_local |
+| Many frames distributed across many machines | s08 zoom_cloud |
 | To serve precomputed regions in a browser | s09 viewer_fastapi |
 
 See [`docs/DESIGN.md §12`](../docs/DESIGN.md) for the structural reasoning — per-op dispatch overhead, SIMT control flow, distributed scheduling cost — behind why these picks vary.
