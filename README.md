@@ -48,7 +48,7 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for why Zarr, why xarray, why Dagster, wh
 
 ## The stages
 
-| # | Stage | Tech | Storage | Target output scale | Reproducible from `pip install`? |
+| # | Stage | Tech | Storage | Target output scale | Reproducible from `uv sync`? |
 |---|---|---|---|---|---|
 | 00 | `s00_naive` | Pure Python nested `for` loops | Raw Zarr (local FS) | 1 frame, 200×200 | ✓ |
 | 01 | `s01_numpy` | NumPy vectorisation | Raw Zarr (local FS) | 1 frame, 1000×1000 | ✓ |
