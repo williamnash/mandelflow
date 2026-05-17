@@ -128,3 +128,34 @@ Things the architecture *names* but does not yet provide. Called out here so the
 - **`GCSIcechunkIOManager`.** Referenced throughout but not yet a published package. Needs writing — a thin shim translating Dagster's `IOManager.load_input` / `handle_output` to icechunk session open / commit. Roughly a few hundred lines. Falls back to raw Zarr with `to_zarr(region=...)` if the icechunk integration proves heavier than expected; document the regression if that happens.
 - **GL context lifecycle for any future on-demand rendering.** `render/gl_context.py` creates a fresh context per call. Any long-running process that uses it (e.g. a future render-on-demand service replacing stage 09's tile-only scope) needs a process-lifecycle singleton, not per-request initialisation. Stage 09's tile server avoids this entirely by serving only precomputed tiles.
 - **The tile pyramid generator.** Stage 09 serves `/tiles/{z}/{x}/{y}.png` from a pyramid; the *generator* for that pyramid is its own piece of work — either an output of the compute stage or a downstream Dagster asset that reads the iterations Zarr and writes a pyramid Zarr/icechunk store.
+
+## 12. Choosing a compute target
+
+The ten stages exist because no single architecture wins every problem in this space. The decision between CPU and GPU — and between in-process and distributed CPU — turns on a small set of structural questions about the work, not on benchmark numbers. The same set of questions applies to picking a compute target for any embarrassingly-parallel numerical workload, not just Mandelbrot.
+
+Heuristics in roughly decreasing order of decisiveness:
+
+- **Per-element work vs dispatch overhead.** GPU stages dispatch one tensor op per arithmetic step. On Apple integrated MPS that's ~200–400 µs/op; on CUDA datacenter GPUs ~5–10 µs. CPU JIT (numba) has effectively zero per-step overhead — the loop runs as native machine code. Mandelbrot's inner loop does very little math per step (a few multiplies), so dispatch dominates on integrated GPUs and CPU JIT wins. Algorithms with denser per-step kernels (matrix multiply, FFT, convolution, neural-net layers) flip this — the per-op cost amortises and GPU wins from the first dispatch.
+
+- **Per-element early termination.** Mandelbrot's per-pixel `break` on escape is free on CPU JIT. On GPU, SIMT lockstep means every pixel runs all `max_iter` iterations regardless of when each individually escapes. In practice s03 (CPU JIT) iterates an average of ~30× per pixel at the canonical view; s05 (GPU tensor ops) iterates 512×. Algorithms without divergent control flow (linear algebra, dense forward passes) suit GPU much better.
+
+- **Working set vs device memory.** GPU memory is smaller than host RAM (typically 16–80 GB on cloud GPUs vs hundreds on a CPU node). When the dataset doesn't fit, you're streaming chunks across PCIe — usually CPU wins. Mandelbrot's working set is trivially small at any reasonable resolution; this isn't a constraint here, but it's the most common reason real workloads stay on CPU.
+
+- **Setup amortisation.** GPU work has high fixed setup (kernel compile, device init, possible memory transfer). Single short queries don't amortise this; long-running batch jobs do. Stage 06's shader collapses the iteration loop into a single dispatched kernel so the per-frame setup is paid once and reused for many iterations — that's the move that beats per-op dispatch overhead.
+
+- **Cross-machine scaling pressure.** When single-machine compute is the bottleneck, scaling out across GPU nodes is operationally heavy (every node needs CUDA drivers, model-state sync, larger images, scarcer hardware). Scaling out across CPU nodes via Dask is operationally simple — that's what s07 and s08 do. The Mandelbrot zoom is intentionally CPU-distributed: per-frame work fits comfortably on a single core's JIT, and frame-level fan-out scales linearly with node count.
+
+### How the repo's stages embody these heuristics
+
+| Stage | Wins when… | Loses when… |
+|---|---|---|
+| s03 numba_opt | Small-medium frames, single machine, divergent per-pixel control flow | Beyond single-machine throughput |
+| s04 dask_local | Many CPU cores, intra-frame parallelism, single-machine | Single-frame work too small to amortise Dask overhead |
+| s05 gpu_torch | Dense per-element math, no per-element branching, CUDA available | Per-op dispatch dominates (integrated GPU + tight loop) |
+| s06 gpu_shader | Deep zoom needing long iteration in one kernel, GPU available | Infrastructure cost (EGL setup, container, GPU node) not justified by single-frame need |
+| s07 / s08 zoom_dask | Many frames, embarrassingly parallel | Per-frame work so cheap that scheduling cost dominates |
+| s09 viewer_fastapi | Serving precomputed regions over the network | Computing new regions on demand (deliberately out of scope) |
+
+### The general principle
+
+**Change what runs and how many copies of it run, not the code that consumes the output.** The Zarr-as-product invariant (§1) is what makes this possible — the renderer doesn't know which stage produced its input, so you can swap stages freely based on what the actual workload demands. That's the underlying reason for ten stages: they're not ten implementations of one thing, they're one contract with ten cost/benefit profiles.

@@ -24,6 +24,21 @@ Wall-clock seconds at `resolution=2048`, `max_iter=512`, canonical view
 | `s08_zoom_cloud` | — | — | Dagster K8s executor on GKE writing to GCS |
 | `s09_viewer_fastapi` | — | — | Read service over precomputed Zarrs (not a compute stage) |
 
+## Which stage should I use?
+
+The wall-clock champion on a laptop is **s04 dask_local**, but the right pick depends on what you're doing:
+
+| You want… | Use stage |
+|---|---|
+| The fastest single frame on a laptop | **s04 dask_local** |
+| Single-frame compute embedded in another Python script (no cluster) | **s03 numba_opt** |
+| Bit-faithful baseline for verification or debugging | **s00 naive** |
+| Deep zoom past float32 precision (~10⁶) | s06 gpu_shader |
+| Many frames computed across many machines | s07 zoom_dask / s08 zoom_cloud |
+| To serve precomputed regions in a browser | s09 viewer_fastapi |
+
+See [`docs/DESIGN.md §12`](../docs/DESIGN.md) for the structural reasoning — per-op dispatch overhead, SIMT control flow, distributed scheduling cost — behind why these picks vary.
+
 ## Stage contract
 
 Each compute stage exports `compute_frame(center_re, center_im, width, resolution, max_iter) -> np.ndarray` and a `run.py` CLI. The output dtype is always `uint16`; bounded-set pixels carry the `max_iter` sentinel (see `common/store.py`).
