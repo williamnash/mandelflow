@@ -22,11 +22,12 @@ except ImportError:
 def test_zoom_writes_multi_frame_zarr(tmp_path):
     out = tmp_path / "zoom.zarr"
     n_frames = 4
+    max_iter = 64
 
     s07_main([
         "--n-frames", str(n_frames),
         "--resolution", "32",
-        "--max-iter", "32",
+        "--max-iter", str(max_iter),
         "--output", str(out),
     ])
 
@@ -37,15 +38,15 @@ def test_zoom_writes_multi_frame_zarr(tmp_path):
     # Per-frame metadata coords are populated for every frame.
     widths = ds.width.values
     assert not np.isnan(widths).any()
-    # Geometric zoom: widths monotonically shrink.
-    assert np.all(np.diff(widths) < 0)
+    assert np.all(np.diff(widths) < 0)  # geometric zoom
 
-    # Frame 0 is the wide canonical view — must contain both bounded and escaped pixels.
-    # Deep-zoom frames may be entirely inside the set, which is correct math; we only
-    # sanity-check that the iteration values are within the valid range for every frame.
-    wide = ds.iterations.isel(frame=0).values
-    assert (wide == 32).any()
-    assert (wide < 32).any()
+    # Fixed-centre zoom: every frame is centred on the same complex coordinate.
+    assert np.all(ds.center_re.values == ds.center_re.values[0])
+    assert np.all(ds.center_im.values == ds.center_im.values[0])
+
+    # At max_iter=64 every frame in the schedule (wide view through 3500x zoom on
+    # the Seahorse spiral) contains both bounded and escaped pixels.
     for k in range(n_frames):
         arr = ds.iterations.isel(frame=k).values
-        assert arr.min() >= 0 and arr.max() <= 32
+        assert (arr == max_iter).any(), f"frame {k} has no in-set pixels"
+        assert (arr < max_iter).any(), f"frame {k} has no escaped pixels"

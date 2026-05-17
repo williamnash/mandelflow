@@ -52,12 +52,9 @@ void main() {
     float u = (u_resolution.x > 1.0) ? j / (u_resolution.x - 1.0) : 0.0;
     float v = (u_resolution.y > 1.0) ? i / (u_resolution.y - 1.0) : 0.0;
 
-    // Add the per-pixel offset directly to the centre. The "obvious"
-    // formulation `(center - width/2) + u*width` subtracts two close
-    // numbers and washes out the small per-pixel offset at deep zoom;
-    // this form preserves it.
-    float cr = u_center.x + (u - 0.5) * u_width;
-    float ci = u_center.y + (v - 0.5) * u_width;
+    float half_w = 0.5 * u_width;
+    float cr = (u_center.x - half_w) + u * u_width;
+    float ci = (u_center.y - half_w) + v * u_width;
 
     // Cardioid + period-2 early exits
     float cr_shift = cr - 0.25;
