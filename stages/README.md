@@ -18,7 +18,7 @@ Wall-clock seconds at `resolution=2048`, `max_iter=512`, canonical view
 | [`s02_numba`](s02_numba/) | 1.13s | 15.7× | `@njit` over the per-pixel loop — kills interpreter overhead |
 | [`s03_numba_opt`](s03_numba_opt/) | 0.12s | 148× | `@vectorize` + fastmath + cardioid/period-2 early exits (single-threaded — kernel-level wins only) |
 | [`s04_dask_local`](s04_dask_local/) | **0.07s** | **253×** | s03's kernel fanned across Dask worker processes — same shape that scales to multi-machine |
-| `s05_gpu_torch` | — | — | PyTorch on CUDA / MPS |
+| [`s05_gpu_torch`](s05_gpu_torch/) | 1.7s (MPS) | 10.4× | PyTorch on CUDA / MPS, float32 throughout — slower than s03/s04 on Apple integrated GPU; expected to be much faster on CUDA |
 | `s06_gpu_shader` | — | — | ModernGL fragment shader on GPU |
 | `s07_zoom_dask` | — | — | Unlocks the frame dimension; many frames in parallel |
 | `s08_zoom_cloud` | — | — | Dagster K8s executor on GKE writing to GCS |

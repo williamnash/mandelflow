@@ -10,11 +10,17 @@ import pytest
 import xarray as xr
 
 from common.store import ITERATIONS_DTYPE
+from render.torch_device import has_gpu
 from stages.s00_naive.run import main as s00_main
 from stages.s01_numpy.run import main as s01_main
 from stages.s02_numba.run import main as s02_main
 from stages.s03_numba_opt.run import main as s03_main
 from stages.s04_dask_local.run import main as s04_main
+
+try:
+    from stages.s05_gpu_torch.run import main as s05_main
+except ImportError:
+    s05_main = None
 
 STAGE_CLIS = [
     pytest.param(s00_main, id="s00_naive"),
@@ -22,6 +28,13 @@ STAGE_CLIS = [
     pytest.param(s02_main, id="s02_numba"),
     pytest.param(s03_main, id="s03_numba_opt"),
     pytest.param(s04_main, id="s04_dask_local"),
+    pytest.param(
+        s05_main, id="s05_gpu_torch",
+        marks=pytest.mark.skipif(
+            not has_gpu(),
+            reason="requires torch + GPU (CUDA or MPS); `uv sync --extra gpu`",
+        ),
+    ),
 ]
 
 

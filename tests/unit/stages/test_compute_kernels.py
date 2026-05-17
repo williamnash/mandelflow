@@ -13,11 +13,17 @@ from __future__ import annotations
 import pytest
 
 from common.store import ITERATIONS_DTYPE
+from render.torch_device import has_gpu
 from stages.s00_naive.compute import compute_frame as s00_compute
 from stages.s01_numpy.compute import compute_frame as s01_compute
 from stages.s02_numba.compute import compute_frame as s02_compute
 from stages.s03_numba_opt.compute import compute_frame as s03_compute
 from stages.s04_dask_local.compute import compute_frame as s04_compute
+
+try:
+    from stages.s05_gpu_torch.compute import compute_frame as s05_compute
+except ImportError:
+    s05_compute = None
 
 STAGES = [
     pytest.param(s00_compute, id="s00_naive"),
@@ -25,6 +31,13 @@ STAGES = [
     pytest.param(s02_compute, id="s02_numba"),
     pytest.param(s03_compute, id="s03_numba_opt"),
     pytest.param(s04_compute, id="s04_dask_local"),
+    pytest.param(
+        s05_compute, id="s05_gpu_torch",
+        marks=pytest.mark.skipif(
+            not has_gpu(),
+            reason="requires torch + GPU (CUDA or MPS); `uv sync --extra gpu`",
+        ),
+    ),
 ]
 
 
