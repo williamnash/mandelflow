@@ -1,29 +1,35 @@
 """Dagster orchestration for mandelflow.
 
-The minimum viable Dagster setup that the design docs have been promising:
-one frame-partitioned `iterations` asset, bound to a compute stage's
-`compute_frame` function, with a custom `IOManager` that writes per-frame
-chunks to a Zarr store via `common.store.write_frame`.
+One frame-partitioned `iterations` asset, three switchable dimensions
+selected at module load time via env vars:
 
-Run the UI locally with:
+| Env var                  | Values                                    | Effect                                  |
+|--------------------------|-------------------------------------------|-----------------------------------------|
+| `MANDELFLOW_KERNEL`      | `gpu_shader` (default), `numba_cpu`, `dask_cpu` | which compute_frame the asset calls     |
+| `MANDELFLOW_STORAGE`     | `zarr` (default), `icechunk`              | which IOManager writes the partitions   |
+| `MANDELFLOW_EXECUTOR`    | `multiprocess` (default), `k8s_cpu`, `k8s_gpu` | how partitions run                  |
+
+Sensible combinations:
+
+  Laptop dev (default):    multiprocess + gpu_shader + zarr
+  Stage 09 (CPU on GKE):   k8s_cpu      + numba_cpu  + icechunk (gs://)
+  Stage 11 (GPU on GKE):   k8s_gpu      + gpu_shader + icechunk (gs://)
+
+Both K8s modes share the same Dagster job code: the only differences are
+node-pool tolerations and GPU resource limits in the Pod spec. The k8s
+executor propagates the relevant env vars into each spawned Pod, so the
+Pod re-loads this module with the right kernel/storage selected. Local
+Dagster (laptop) talks to the remote cluster via `~/.kube/config`.
+
+Local UI:
 
     uv run dagster dev -m orchestration.definitions
-
-Then open <http://localhost:3000>. The asset graph shows `iterations`
-partitioned across N_FRAMES. Click "Materialize all" to compute every
-frame; Dagster's multiprocess executor parallelises across partitions.
+    # Opens <http://localhost:3000>; asset graph shows N_FRAMES partitions.
 
 Architectural notes (DESIGN.md §3):
-- Partitions ≡ frames. The single `iterations` asset has one partition
-  per frame index.
-- IOManager ≡ storage. `ZarrFrameIOManager` writes to whatever path is
-  configured — local FS or `gs://` (xarray + gcsfs handle both).
-- Executor swap is the only diff between local and cluster runs.
-  Currently `multiprocess_executor` (laptop); s11 will swap to
-  `k8s_job_executor` (one Pod per partition) with the same asset code.
-
-This module is intentionally small. Pick the kernel by changing the
-`compute_frame` import; everything else stays the same.
+- Partitions ≡ frames. One `iterations` asset, one partition per frame.
+- IOManager ≡ storage. Same asset code regardless of backend.
+- Executor swap is what distinguishes local from cluster runs.
 """
 
 from __future__ import annotations
@@ -45,7 +51,22 @@ from dagster import (
 
 from common.schedule import canonical_schedule
 from common.store import ITERATIONS_DTYPE, create_iterations_dataset, write_frame
-from stages.s07_zoom_local.compute import compute_frame
+
+# Kernel selector. Driven by env so the same module config works for both
+# the local laptop (default GPU shader) and the K8s case (where the Pod
+# inherits MANDELFLOW_KERNEL from the executor's env_vars config).
+_KERNEL = os.environ.get("MANDELFLOW_KERNEL", "gpu_shader").lower()
+if _KERNEL == "gpu_shader":
+    from stages.s07_zoom_local.compute import compute_frame
+elif _KERNEL == "numba_cpu":
+    from stages.s03_numba_opt.compute import compute_frame
+elif _KERNEL == "dask_cpu":
+    from stages.s04_dask_local.compute import compute_frame
+else:
+    raise ValueError(
+        f"MANDELFLOW_KERNEL={_KERNEL!r} unrecognised. "
+        f"Try: gpu_shader, numba_cpu, dask_cpu."
+    )
 
 # Configuration. Bump these to do a bigger run; partition count is fixed
 # at module load time, so changing N_FRAMES means restarting `dagster dev`.
@@ -212,6 +233,106 @@ class IcechunkFrameIOManager(ConfigurableIOManager):
         ).values
 
 
+def _k8s_executor(*, gpu: bool):
+    """Build a k8s_job_executor configured for our compute Pods.
+
+    `gpu=False` (s09 architecture): plain CPU Pods. CPU node pool default
+    selectors apply. Each Pod gets 2 vCPU / 4 GiB.
+
+    `gpu=True` (s11 architecture): adds the nvidia.com/gpu toleration so
+    Pods schedule onto the tainted GPU node pool, plus a GPU resource
+    limit so the device plugin makes one T4 available to the container.
+
+    Both modes propagate MANDELFLOW_KERNEL / _STORAGE / _ICECHUNK_PATH
+    into the Pod env so the spawned partition re-loads this module with
+    the same selection state. This is what makes "same code laptop and
+    cluster" actually true.
+
+    Dagster talks to the cluster via the laptop's `~/.kube/config` (set
+    up by `gcloud container clusters get-credentials …`). For in-cluster
+    Dagster (e.g., a self-hosted Dagster deployment on GKE), set
+    `load_incluster_config: True` instead.
+    """
+    from dagster_k8s import k8s_job_executor
+
+    image = os.environ.get(
+        "MANDELFLOW_IMAGE",
+        "us-central1-docker.pkg.dev/mandelflow-2026/mandelflow/compute:dev",
+    )
+    sa = os.environ.get("MANDELFLOW_K8S_SA", "compute-sa")
+
+    # Env vars to forward from Dagster (laptop) into every spawned Pod.
+    # Only forward the ones the Pod's orchestration.definitions will read.
+    forwarded = {}
+    for key in (
+        "MANDELFLOW_KERNEL", "MANDELFLOW_STORAGE",
+        "MANDELFLOW_ICECHUNK_PATH", "MANDELFLOW_IMAGE",
+    ):
+        if key in os.environ:
+            forwarded[key] = os.environ[key]
+    env_vars = [f"{k}={v}" for k, v in forwarded.items()]
+
+    config = {
+        "job_image": image,
+        "image_pull_policy": "Always",
+        "service_account_name": sa,
+        "env_vars": env_vars,
+        "max_concurrent": 16,
+    }
+
+    if gpu:
+        config["step_k8s_config"] = {
+            "pod_spec_config": {
+                "tolerations": [{
+                    "key": "nvidia.com/gpu",
+                    "operator": "Equal",
+                    "value": "present",
+                    "effect": "NoSchedule",
+                }],
+            },
+            "container_config": {
+                "resources": {
+                    "limits": {"nvidia.com/gpu": "1", "memory": "8Gi"},
+                    "requests": {"cpu": "2", "memory": "4Gi"},
+                },
+            },
+        }
+    else:
+        config["step_k8s_config"] = {
+            "container_config": {
+                "resources": {
+                    "limits": {"cpu": "2", "memory": "4Gi"},
+                    "requests": {"cpu": "1", "memory": "2Gi"},
+                },
+            },
+        }
+
+    return k8s_job_executor.configured(config)
+
+
+def _select_executor():
+    """Pick the executor based on MANDELFLOW_EXECUTOR env var.
+
+    `multiprocess` (default): local OS-process parallelism. Fine for the
+    laptop demo and CI.
+    `k8s_cpu`: dagster-k8s `k8s_job_executor` — one K8s Job per partition,
+    no GPU toleration. The s09 architecture.
+    `k8s_gpu`: same but with GPU toleration + GPU resource limit. The s11
+    architecture.
+    """
+    mode = os.environ.get("MANDELFLOW_EXECUTOR", "multiprocess").lower()
+    if mode == "multiprocess":
+        return multiprocess_executor
+    if mode == "k8s_cpu":
+        return _k8s_executor(gpu=False)
+    if mode == "k8s_gpu":
+        return _k8s_executor(gpu=True)
+    raise ValueError(
+        f"MANDELFLOW_EXECUTOR={mode!r} unrecognised. "
+        f"Try: multiprocess, k8s_cpu, k8s_gpu."
+    )
+
+
 def _select_io_manager():
     """Pick the IOManager based on MANDELFLOW_STORAGE env var.
 
@@ -258,10 +379,7 @@ def iterations(context) -> np.ndarray:
 
 defs = Definitions(
     assets=[iterations],
-    # multiprocess_executor parallelises partitions across N OS processes.
-    # For s11 (GKE fan-out) this becomes k8s_job_executor from dagster-k8s,
-    # one Pod per partition. Same asset code; only the executor changes.
-    executor=multiprocess_executor,
+    executor=_select_executor(),
     # IOManager key remains `zarr_io` for both backends — the asset's
     # io_manager_key doesn't care which storage shim it gets.
     resources={"zarr_io": _select_io_manager()},

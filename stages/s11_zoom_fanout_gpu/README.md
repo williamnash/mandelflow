@@ -110,13 +110,30 @@ The dispatcher builds the schedule, computes frame ranges, and submits one K8s J
 
 This is the path the local `dev/kind-cluster.yaml` validates — it spins up a CPU-only `kind` cluster on your laptop, so you can exercise the dispatch / submit / poll / retry logic without a real GKE bill or GPU.
 
-### Path B: Dagster K8s executor (the architectural target)
+### Path B: Dagster K8s executor (the architectural target — implemented)
 
-The `iterations` asset in `orchestration/definitions.py` is partitioned by frame; Dagster's `k8s_job_executor` launches Pods automatically. The asset graph is unchanged from local Dagster runs — only the executor config and the `IOManager` change. Materialise via the Dagster UI or `dagster job execute`.
+`orchestration/definitions.py` now supports this directly. The `iterations` asset is partitioned by frame; Dagster's `k8s_job_executor` launches one Pod per partition. The asset graph is unchanged from local Dagster runs — only the executor config and the `IOManager` change, both selectable via env var:
 
-Path B requires:
-- `orchestration/definitions.py` to exist (currently a known gap).
-- `GCSIcechunkIOManager` — or raw Zarr region writes via `gcsfs` — for parallel-safe per-chunk writes. Icechunk is referenced in DESIGN.md §7 but the IOManager glue is itself unwritten (DESIGN.md §11).
+```bash
+# Materialize all 120 partitions across the GKE GPU pool, writing to GCS icechunk
+MANDELFLOW_EXECUTOR=k8s_gpu \
+MANDELFLOW_KERNEL=gpu_shader \
+MANDELFLOW_STORAGE=icechunk \
+MANDELFLOW_ICECHUNK_PATH=gs://mandelflow-2026-zarr/runs/s11.icechunk \
+uv run dagster asset materialize \
+  --module-name orchestration.definitions \
+  --select iterations --partition-range 0000...0119
+```
+
+The k8s_gpu executor injects a `nvidia.com/gpu: Equal: present: NoSchedule` toleration plus a `nvidia.com/gpu: 1` resource limit into every Pod, so Pods schedule onto the tainted GPU node pool with the device-plugin-mounted T4 attached.
+
+Env vars (`MANDELFLOW_*`) propagate from the local Dagster (laptop) into every spawned Pod, so each Pod re-loads `orchestration.definitions` with the same kernel/storage selection. Same code, both sides. See `orchestration/definitions.py` for the matrix.
+
+Path B requires (in order):
+- `~/.kube/config` set up — `gcloud container clusters get-credentials mandelflow --region us-central1`.
+- KSA `compute-sa` in the `default` namespace, annotated to impersonate `mandelflow-compute@<project>.iam.gserviceaccount.com` (created by Terraform; the KSA annotation is `kubectl annotate serviceaccount compute-sa iam.gke.io/gcp-service-account=...`).
+- T4 GPU quota in the project's region.
+- The image must be in Artifact Registry (rebuild after schema changes).
 
 ## What lives in each subdirectory
 
