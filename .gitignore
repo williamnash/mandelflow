@@ -20,6 +20,7 @@ dist/
 *.mp4
 *.gif
 *.zarr/
+*.icechunk/
 frames/
 
 # Terraform
