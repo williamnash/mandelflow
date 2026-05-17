@@ -10,6 +10,7 @@ import pytest
 import xarray as xr
 
 from common.store import ITERATIONS_DTYPE
+from render.gl_context import has_gl
 from render.torch_device import has_gpu
 from stages.s00_naive.run import main as s00_main
 from stages.s01_numpy.run import main as s01_main
@@ -22,6 +23,11 @@ try:
 except ImportError:
     s05_main = None
 
+try:
+    from stages.s06_gpu_shader.run import main as s06_main
+except ImportError:
+    s06_main = None
+
 STAGE_CLIS = [
     pytest.param(s00_main, id="s00_naive"),
     pytest.param(s01_main, id="s01_numpy"),
@@ -33,6 +39,13 @@ STAGE_CLIS = [
         marks=pytest.mark.skipif(
             not has_gpu(),
             reason="requires torch + GPU (CUDA or MPS); `uv sync --extra gpu`",
+        ),
+    ),
+    pytest.param(
+        s06_main, id="s06_gpu_shader",
+        marks=pytest.mark.skipif(
+            not has_gl(),
+            reason="requires moderngl + pygame + GL drivers; `uv sync --extra gpu`",
         ),
     ),
 ]

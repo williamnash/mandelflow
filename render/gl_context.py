@@ -13,6 +13,22 @@ from __future__ import annotations
 import sys
 
 
+def has_gl() -> bool:
+    """Non-raising preflight: can we make a GL 4.1 offscreen context?
+
+    Imports moderngl / pygame lazily and actually creates+releases a
+    1x1 context to verify drivers work, not just that the libraries
+    are installed. Used by test parametrize lists to skip s06 when
+    GL isn't reachable.
+    """
+    try:
+        ctx = make_offscreen_context(1, 1)
+        ctx.release()
+        return True
+    except Exception:
+        return False
+
+
 def make_offscreen_context(width: int = 1, height: int = 1):
     """Return a moderngl Context suitable for offscreen rendering.
 

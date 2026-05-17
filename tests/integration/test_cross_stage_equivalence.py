@@ -14,6 +14,7 @@ from __future__ import annotations
 import pytest
 
 from common.testing import assert_iterations_close
+from render.gl_context import has_gl
 from render.torch_device import has_gpu
 from stages.s00_naive.compute import compute_frame as s00_compute
 from stages.s01_numpy.compute import compute_frame as s01_compute
@@ -25,6 +26,11 @@ try:
     from stages.s05_gpu_torch.compute import compute_frame as s05_compute
 except ImportError:
     s05_compute = None
+
+try:
+    from stages.s06_gpu_shader.compute import compute_frame as s06_compute
+except ImportError:
+    s06_compute = None
 
 _PARAMS = dict(
     center_re=-0.75,
@@ -45,6 +51,13 @@ STAGES = [
         marks=pytest.mark.skipif(
             not has_gpu(),
             reason="requires torch + GPU (CUDA or MPS); `uv sync --extra gpu`",
+        ),
+    ),
+    pytest.param(
+        s06_compute, 5.0, 1, id="s06_gpu_shader",
+        marks=pytest.mark.skipif(
+            not has_gl(),
+            reason="requires moderngl + pygame + GL drivers; `uv sync --extra gpu`",
         ),
     ),
 ]
