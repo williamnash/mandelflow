@@ -30,7 +30,7 @@ These exist for explicit design reasons (see `docs/DESIGN.md`). Don't violate th
 ```
 common/                  # Schedule (canonical zoom path), Zarr schema helpers, colormap
 stages/sNN_<name>/       # One package per stage. Same contract, different implementation.
-  s08_zoom_cloud_cpu/    # Single cloud VM, CPU kernel — deployable today
+  s08_zoom_cloud_cpu/    # Single cloud VM, CPU kernel via s04 (Dask) — working
     terraform/           # VM + GCS bucket + attached SA + IAP firewall + budget
   s09_zoom_fanout_cpu/   # Multi-machine CPU fan-out (placeholder)
   s10_zoom_cloud_gpu/    # Single cloud VM, GPU kernel (placeholder; GCP quota blocked)

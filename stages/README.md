@@ -21,7 +21,7 @@ Wall-clock seconds at `resolution=2048`, `max_iter=512`, canonical view
 | [`s05_gpu_torch`](s05_gpu_torch/) | 1.7s (MPS) | 10.4× | PyTorch on CUDA / MPS, float32 throughout — slower than s03/s04 on Apple integrated GPU; expected to be much faster on CUDA |
 | [`s06_gpu_shader`](s06_gpu_shader/) | **0.06s (MPS)** | **295×** | GLSL fragment shader; entire iteration loop in one GPU dispatch — barely scales with image size, unlocks deep zoom |
 | [`s07_zoom_local`](s07_zoom_local/) | 1.36s for 120 frames @ 720² | 11.3 ms/frame | Multi-frame zoom on one machine using s06's kernel with shared GL context; produces the first real zoom MP4 |
-| [`s08_zoom_cloud_cpu`](s08_zoom_cloud_cpu/) | scaffold | — | Single cloud VM, CPU kernel (s03) — ship s07 to one cloud machine, write to GCS |
+| [`s08_zoom_cloud_cpu`](s08_zoom_cloud_cpu/) | working | — | Single cloud VM, CPU kernel (s04 = s03 + Dask local cluster for intra-frame fanout). Writes to GCS. |
 | [`s09_zoom_fanout_cpu`](s09_zoom_fanout_cpu/) | placeholder | — | Multi-machine CPU fan-out (Cloud Run Jobs likely) |
 | [`s10_zoom_cloud_gpu`](s10_zoom_cloud_gpu/) | placeholder | — | Single cloud VM, GPU kernel (s06); blocked on GCP `GPUS_ALL_REGIONS` quota |
 | [`s11_zoom_fanout_gpu`](s11_zoom_fanout_gpu/) | scaffold | — | GKE multi-Pod fan-out, GPU per Pod, writing to a shared GCS Zarr |

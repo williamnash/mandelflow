@@ -1,6 +1,6 @@
 # Stage 08 — Single cloud machine, CPU kernel
 
-The simplest cloud-deployment shape: one **GCE VM** running mandelflow's existing Docker image with the **s03 numba kernel**, output written to GCS. No cluster, no Kubernetes, no GPU. This is the first stage in the cloud progression and the deployable target while GPU quota is unresolved.
+The simplest cloud-deployment shape: one **GCE VM** running mandelflow's existing Docker image. Each frame is computed via **s04's pattern** (s03 numba kernel + Dask intra-frame tile fanout), so all available CPU cores on the VM are saturated. Output to GCS. No K8s cluster, no GPU. This is the first stage in the cloud progression and the deployable target while GPU quota is unresolved.
 
 ## Where this sits in the cloud progression
 
@@ -26,7 +26,7 @@ The VM is *also* the cheapest thing to teach because the lifecycle is obvious: `
 
 | Resource | Purpose | Approx. cost |
 |---|---|---|
-| `e2-standard-2` GCE VM (2 vCPU, 8 GB) | Runs the mandelflow container, s03 CPU kernel | ~$0.067/hr while running |
+| `e2-standard-2` GCE VM (2 vCPU, 8 GB) | Runs the mandelflow container with s04's Dask-parallelised kernel | ~$0.067/hr while running |
 | Container-Optimized OS boot disk | Smaller + Docker preinstalled, no apt detour | included |
 | **GCS bucket** | Holds `runs/<id>.zarr` | pennies (under 5 GB free tier) |
 | **Service account** + IAM bindings | VM → GCS access (no JSON keys) | free |
@@ -99,7 +99,7 @@ The bucket has `force_destroy = true` so any Zarrs inside are removed when the b
 It's barely different. s07's loop, with:
 
 - `--output` can be a `gs://bucket/path.zarr` URL — xarray + zarr + gcsfs speak GCS through the existing `common.store.write_frame` API.
-- No GL context is acquired — the compute kernel imported from `stages.s08_zoom_cloud_cpu.compute` is **s03** (numba, single-thread + fastmath + early exits), not s06 (GPU shader). That's the swap that distinguishes a CPU deploy from a GPU one.
+- No GL context is acquired — the compute kernel imported from `stages.s08_zoom_cloud_cpu.compute` is **s04** (s03 fastmath kernel + Dask intra-frame tile fanout), not s06 (GPU shader). `run.py` opens a `LocalCluster` + `Client` so the active Dask scheduler uses all available CPU cores; without that, the per-frame compute falls back to single-threaded. That's the swap that distinguishes a CPU deploy from a GPU one.
 
 For the standalone CLI, `--output gs://bucket/path.zarr` is the only deployment-aware change.
 
@@ -111,6 +111,8 @@ For the standalone CLI, `--output gs://bucket/path.zarr` is the only deployment-
 
 ## Expected perf
 
-s03 at 1080² on an e2-standard-2 vCPU should be roughly **0.5–1 s/frame** (vs ~12 ms/frame for s06 on a T4). For a 120-frame demo zoom: **~1–2 minutes** wall-clock. Cost: pennies.
+On the laptop (M-series, ~12 logical CPUs, Dask spawns ~5 workers): **240 frames at 1080² × max_iter=4096 ran in 151s** during local validation. Per-frame mean ~630 ms.
 
-That's the right scale for "validate the cloud pipeline end-to-end" — long enough to see the timing, short enough to not melt your budget.
+On the cloud VM (e2-standard-2, 2 vCPUs): Dask spawns ~2 workers; expect roughly **2× slower per frame** than the laptop, plus Dask process-startup amortising over fewer cores. For a 60-frame 480² demo: ~25s wall-clock (matches our actual cloud run). Cost: pennies.
+
+For a real-time demo: validate the pipeline end-to-end at smaller resolution and frame count (under a minute, under a penny), then scale up resolution / frames once the box is healthy.

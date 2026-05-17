@@ -55,3 +55,18 @@ def test_zero_frames_rejected():
     import pytest
     with pytest.raises(ValueError):
         canonical_schedule(0)
+
+
+def test_width_overrides_take_effect():
+    """Passing initial_width / final_width overrides the module constants."""
+    _, _, w = canonical_schedule(10, initial_width=10.0, final_width=1e-5)
+    assert np.isclose(w[0], 10.0)
+    assert np.isclose(w[-1], 1e-5)
+
+
+def test_center_override_takes_effect():
+    """Passing a `center` overrides ZOOM_CENTER for the schedule."""
+    target = (-1.7480368905611776, 0.0)
+    cr, ci, _ = canonical_schedule(20, center=target)
+    assert np.all(cr == target[0])
+    assert np.all(ci == target[1])

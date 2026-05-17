@@ -80,7 +80,7 @@ resource "google_container_node_pool" "gpu_pool" {
     ]
   }
 
-  # TODO(s08): autoscaling block. For demo, fixed `var.gpu_node_count` is simpler.
+  # TODO(s11): autoscaling block. For demo, fixed `var.gpu_node_count` is simpler.
   # For real batch fan-out, set min_node_count=0 and let cluster-autoscaler
   # scale to zero between runs.
 }

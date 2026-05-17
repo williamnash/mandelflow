@@ -19,7 +19,7 @@ terraform {
     }
   }
 
-  # TODO(s08): swap to a GCS-backed remote backend once the bucket below exists,
+  # TODO(s11): swap to a GCS-backed remote backend once the bucket below exists,
   # so state is shared between you and CI. For first apply, local backend is
   # fine; create the bucket, then move state via `terraform init -migrate-state`.
   # backend "gcs" {

@@ -1,6 +1,6 @@
 # Stage 07 — Local multi-frame zoom
 
-**120 frames at 720×720 in ~1.4s** on Apple MPS (~11.5 ms/frame), zooming 3,500× from the canonical Mandelbrot view into the Seahorse Valley spiral at `(-0.7435, 0.1314)`. The first multi-frame artifact in the repo: a `(120, 720, 720)` Zarr and the MP4 stitched from it.
+**120 frames at 720×720 in ~1.4s** on Apple MPS (~11.5 ms/frame), zooming 3,500× from the canonical Mandelbrot view into the Seahorse Valley spiral at `(-0.743643887037151, 0.131825904205330)`. The first multi-frame artifact in the repo: a `(120, 720, 720)` Zarr and the MP4 stitched from it.
 
 s07 isn't a new kernel. It's the **orchestration** stage that unlocks the frame dimension on a single machine.
 
@@ -10,7 +10,7 @@ Four things that didn't exist before this stage:
 
 1. **Multi-frame Zarr writes.** Stages 00–06 always wrote `frame=0` into a `(1, H, W)` store. s07 builds an `(N, H, W)` store and uses the region-write pattern from `common/store.py` properly for the first time — one chunk per frame, per-frame metadata (`center_re`, `center_im`, `width`) populated as we go.
 
-2. **The canonical zoom schedule** (`common/schedule.py`). A pure **converge-on-a-point** zoom: the centre is fixed at the Seahorse Valley spiral `(-0.7435, 0.1314)` for every frame; only the width changes, log-spaced from `INITIAL_WIDTH=3.5` to `FINAL_WIDTH=1e-3` via `np.logspace`. Frame 0 = the canonical full Mandelbrot (centred on the zoom target, so slightly off-centre from the textbook view); frame N-1 = deep zoom at 3,500× magnification.
+2. **The canonical zoom schedule** (`common/schedule.py`). A pure **converge-on-a-point** zoom: the centre is fixed at the Seahorse Valley spiral `(-0.743643887037151, 0.131825904205330)` — full float64 precision, so deep zooms (out to ~10⁻¹³) land on real boundary structure rather than iteration plateaus. Only the width changes, log-spaced from `INITIAL_WIDTH=3.5` to `FINAL_WIDTH=1e-3` via `np.logspace`. Frame 0 = the canonical full Mandelbrot (centred on the zoom target, so slightly off-centre from the textbook view); frame N-1 = deep zoom at 3,500× magnification.
 
    An earlier version walked the centre linearly from `(-0.75, 0)` to the target. That looked smooth in isolation but read as "pan-and-zoom" rather than a true zoom, and the linear path passed through fractal iteration plateaus that flickered in the MP4. Fixed centre + log widths is the standard Mandelbrot-zoom pattern for that reason — you converge on a complex coordinate, you don't pan while doing it.
 

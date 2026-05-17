@@ -236,16 +236,13 @@ exec: "/app/.venv/bin/python": stat ...: no such file or directory
 
 **Cause:** uv builds the venv with the *builder image's* Python. The venv stores symlinks like `/app/.venv/bin/python → /usr/local/bin/python3`. The runtime image (`nvidia/cuda:...`) has Python installed via apt at `/usr/bin/python3.12`, *not* `/usr/local/bin/python3`. The symlink resolves to a path that doesn't exist in the runtime, so the binary is unreachable.
 
-**Fix options (haven't picked one yet — TODO):**
-1. **Add a compatibility symlink in the runtime stage:**
-   ```dockerfile
-   RUN ln -s /usr/bin/python3.12 /usr/local/bin/python3
-   ```
-2. **Build the venv inside the runtime stage** (no copy-from-builder). Slower build, smaller image.
-3. **Use uv inside the runtime image** — install uv, `uv sync` against the runtime's Python. Cleanest but adds uv to the runtime.
-4. **Use `uv run python` from a unified image** — requires the runtime image to have uv.
+**Fix (applied):** option 1 — add a compatibility symlink in the runtime stage of the Dockerfile:
 
-Recommended: option 1 (one-line `RUN ln -s ...` in the Dockerfile's runtime stage). Pragmatic, minimal.
+```dockerfile
+RUN ln -sf /usr/bin/python${PYTHON_VERSION} /usr/local/bin/python3
+```
+
+Other options considered: rebuild the venv inside the runtime stage (slower build, smaller image), install `uv` in the runtime, or use `uv run python` everywhere. Symlink is the smallest change and works for both `python` and `python3.12` venv shims.
 
 ### #7 — `default-allow-ssh` firewall rule auto-created on every project, must be deleted manually
 
@@ -269,7 +266,7 @@ This worked cleanly. The other half: if you split a stage's resources across two
 
 Captured as TODO items, not blockers for the 2026-05-17 progress:
 
-- [ ] **Fix the Dockerfile python symlink** (Gotcha #6). One-line `RUN ln -s` in the runtime stage.
+- [x] **Fix the Dockerfile python symlink** (Gotcha #6). Done — `RUN ln -sf /usr/bin/python${PYTHON_VERSION} /usr/local/bin/python3` in the runtime stage.
 - [ ] **Move PGA to Terraform** (Gotcha #4). Add `google_compute_subnetwork` data + an `--enable-private-ip-google-access` flag, or skip and document the manual step.
 - [ ] **Delete `default-allow-ssh` in Terraform** (Gotcha #7). Currently a manual `gcloud` command.
 - [ ] **Bake `docker login` into the VM's startup OR a wrapper script** (Gotcha #5). So users don't have to do it manually after SSH.
@@ -311,7 +308,10 @@ As of 2026-05-17:
 | `default-allow-ssh` | deleted |
 | Budget alert | $50 cap with $10/$50 thresholds |
 | GPU quota | denied 2026-05-17, can resubmit 2026-05-19 |
-| Image runnable | initially NO (Gotcha #6); fixed in Dockerfile, requires rebuild |
-| Code executed end-to-end on the VM | **NO** — we got as far as the container starting but `exec python` failed. The Dockerfile fix has been applied; rebuild + re-run needed to actually validate. |
+| Image runnable | YES — Dockerfile python symlink applied, rebuild + push pushed `compute:dev@sha256:13580…` |
+| Code executed end-to-end on the VM | **YES (2026-05-17)** — `docker run … python -m stages.s08_zoom_cloud_cpu.run` produced a 30-frame Zarr at `gs://mandelflow-2026-zarr/runs/first-run.zarr` (1.9 MB). Pulled locally; rendered to PNG + MP4 via existing pipeline. Full loop validated. |
+| Compute kernel inside the container | **s04 (s03 numba kernel + Dask LocalCluster)** — single-thread on s03 was the original cloud build; we swapped to s04 so all VM cores are used. Same code on laptop saturates ~5 of 12 CPUs via Dask. |
+| Cloud Build cache | configured: `:cache` tag in Artifact Registry; subsequent builds ~1-2 min instead of ~11 |
+| VM | stopped (2026-05-17) — restart with `gcloud compute instances start mandelflow-vm --zone=us-central1-b` |
 
 To pick up from here on a future session: read this doc top-to-bottom; the playbook order is the order the steps should run.
