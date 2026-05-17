@@ -1,7 +1,7 @@
 # GCS bucket for Zarr outputs. One bucket holds all run.zarr stores under
 # `gs://<bucket>/runs/<run_id>.zarr/`.
 #
-# Standard storage class for hot reads (the viewer in s09 will hit this).
+# Standard storage class for hot reads (the viewer in s10 will hit this).
 # Soft delete is on (7-day default) so a stray `gsutil rm` doesn't lose data.
 
 resource "google_storage_bucket" "zarr_outputs" {
@@ -12,8 +12,13 @@ resource "google_storage_bucket" "zarr_outputs" {
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
 
+  # `terraform destroy` deletes the bucket even if it has objects in it.
+  # Zarrs are reproducible from the kernel; we'd rather have clean teardown
+  # than versioned recovery in this teaching repo.
+  force_destroy = true
+
   # 30-day lifecycle move to nearline once we're keeping older runs around.
-  # TODO(s08): enable this when we have runs worth archiving.
+  # TODO(s09): enable this when we have runs worth archiving.
   # lifecycle_rule {
   #   condition { age = 30 }
   #   action {

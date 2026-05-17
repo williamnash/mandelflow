@@ -10,6 +10,12 @@ resource "google_storage_bucket" "zarr_outputs" {
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
 
+  # `terraform destroy` deletes the bucket even if it has objects in it.
+  # Without this, destroy fails when Zarr runs exist and you orphan the
+  # bucket (and continue paying for storage). Zarrs are reproducible from
+  # the kernel, so we don't need versioning + manual cleanup.
+  force_destroy = true
+
   versioning {
     enabled = false
   }

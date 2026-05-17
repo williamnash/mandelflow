@@ -82,8 +82,15 @@ docker run --gpus all \
 gsutil -m cp -r gs://<bucket>/runs/dev.zarr ./
 
 # 6. TEAR IT DOWN
+# The GCS bucket has force_destroy=true so terraform handles Zarrs.
+# Artifact Registry is NOT force-destroyable — clear the image first:
+gcloud artifacts docker images delete \
+  <region>-docker.pkg.dev/<project>/mandelflow/compute:dev --delete-tags
+
 terraform destroy -var-file=terraform.tfvars
 ```
+
+If you forget to delete the Artifact Registry image, `terraform destroy` will fail on the `google_artifact_registry_repository` resource. The error is clear ("repository must be empty before deletion"); just run the `gcloud artifacts docker images delete` line and re-run destroy. **The GCS bucket cleans itself up automatically** — `force_destroy=true` is set on the bucket resource specifically to avoid orphan storage charges after a destroy.
 
 The startup script the VM gets includes the NVIDIA driver install — first boot takes ~3–5 minutes for that step before Docker can see the GPU. The driver state survives reboot; subsequent runs are immediate.
 
