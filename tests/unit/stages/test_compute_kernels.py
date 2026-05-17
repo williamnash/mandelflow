@@ -17,12 +17,14 @@ from stages.s00_naive.compute import compute_frame as s00_compute
 from stages.s01_numpy.compute import compute_frame as s01_compute
 from stages.s02_numba.compute import compute_frame as s02_compute
 from stages.s03_numba_opt.compute import compute_frame as s03_compute
+from stages.s04_dask_local.compute import compute_frame as s04_compute
 
 STAGES = [
     pytest.param(s00_compute, id="s00_naive"),
     pytest.param(s01_compute, id="s01_numpy"),
     pytest.param(s02_compute, id="s02_numba"),
     pytest.param(s03_compute, id="s03_numba_opt"),
+    pytest.param(s04_compute, id="s04_dask_local"),
 ]
 
 

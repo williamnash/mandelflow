@@ -17,7 +17,7 @@ Wall-clock seconds at `resolution=2048`, `max_iter=512`, canonical view
 | [`s01_numpy`](s01_numpy/) | 10.87s | 1.6× | Vectorised numpy with mask-tracked escapes |
 | [`s02_numba`](s02_numba/) | 1.14s | 15.5× | `@njit` over the per-pixel loop |
 | [`s03_numba_opt`](s03_numba_opt/) | 0.05s | **354×** | `@vectorize(parallel, fastmath)` + cardioid/period-2 early exits |
-| `s04_dask_local` | — | — | Dask local cluster; intra-frame tile fan-out |
+| [`s04_dask_local`](s04_dask_local/) | 3.00s | 5.9× | Dask `LocalCluster`; tile fan-out across worker processes (slower than s03 by design — same shape that scales to multi-machine) |
 | `s05_gpu_torch` | — | — | PyTorch on CUDA / MPS |
 | `s06_gpu_shader` | — | — | ModernGL fragment shader on GPU |
 | `s07_zoom_dask` | — | — | Unlocks the frame dimension; many frames in parallel |

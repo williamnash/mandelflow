@@ -14,12 +14,14 @@ from stages.s00_naive.run import main as s00_main
 from stages.s01_numpy.run import main as s01_main
 from stages.s02_numba.run import main as s02_main
 from stages.s03_numba_opt.run import main as s03_main
+from stages.s04_dask_local.run import main as s04_main
 
 STAGE_CLIS = [
     pytest.param(s00_main, id="s00_naive"),
     pytest.param(s01_main, id="s01_numpy"),
     pytest.param(s02_main, id="s02_numba"),
     pytest.param(s03_main, id="s03_numba_opt"),
+    pytest.param(s04_main, id="s04_dask_local"),
 ]
 
 
