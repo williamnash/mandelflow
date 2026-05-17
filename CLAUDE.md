@@ -4,7 +4,7 @@ Operating context for Claude Code when working in this repo. Keep this file lean
 
 ## What this is
 
-`mandelflow` is a data engineering scaling study built around the Mandelbrot set. Eleven progressively scaled stages (`stages/s00_naive/` through `stages/s10_viewer_fastapi/`) demonstrate optimisation patterns from naive Python to Kubernetes-fanned GPU rendering. The repo's purpose is portfolio + pedagogy, not production.
+`mandelflow` is a data engineering scaling study built around the Mandelbrot set. Thirteen progressively scaled stages (`stages/s00_naive/` through `stages/s12_viewer_fastapi/`) demonstrate optimisation patterns from naive Python to Kubernetes-fanned GPU rendering. The cloud progression specifically is a 2×2 of (single vs many machines) × (CPU vs GPU): s08/s09/s10/s11. The repo's purpose is portfolio + pedagogy, not production.
 
 ## Load-bearing invariants
 
@@ -12,31 +12,33 @@ These exist for explicit design reasons (see `docs/DESIGN.md`). Don't violate th
 
 1. **The data product is the Zarr store, not the rendered video.** Compute stages write a labelled xarray-over-Zarr. MP4 / PNG output is downstream rendering, owned by `render/`. Never propose writing MP4 directly from a compute stage.
 2. **Every stage exposes `compute_frame(center_re, center_im, width, resolution, max_iter) -> np.ndarray`** plus a `run.py` CLI. That's the contract Dagster's asset binds to.
-3. **Raw Zarr for stages 00–06; icechunk for stages 07–09.** Stages 00–06 are single-writer (no transactional semantics needed). The icechunk migration at stage 07 is itself a teaching moment — don't move it earlier "for consistency."
-4. **Reproducibility contract:** stages 00–04 must run from `uv sync && uv run python -m stages.<id>.run` on a stock laptop. No GPU, no cloud creds. Stages requiring GPU (05, 06, 07) or cloud (08, 09) must fail with **one clear line** naming the missing prerequisite — never a stack trace.
+3. **Raw Zarr for stages 00–06; icechunk for stages 07–11.** Stages 00–06 are single-writer (no transactional semantics needed). The icechunk migration at stage 07 is itself a teaching moment — don't move it earlier "for consistency."
+4. **Reproducibility contract:** stages 00–04 must run from `uv sync && uv run python -m stages.<id>.run` on a stock laptop. No GPU, no cloud creds. Stages requiring GPU (05, 06, 07) or cloud (08–11) must fail with **one clear line** naming the missing prerequisite — never a stack trace.
 5. **Cross-platform GL.** `render/gl_context.py` picks hidden pygame (macOS) or EGL standalone (Linux containers). Same shader on both. Don't hard-code one path.
 6. **Cross-platform torch.** `render/torch_device.py` picks CUDA → MPS → raise. Stage 05 runs in **float32** throughout (separate real / imag arrays, not complex dtypes) so the same code path works on CUDA, MPS, and CPU without MPS's historical complex-dtype gaps. Float32 caps useful zoom at ~10⁶; deep zoom lives in stage 06's shader, not stage 05.
-7. **Stage 10 is read-only.** Tile server + frame PNG endpoints over precomputed Zarrs. No GPU, no GL context. On-demand rendering of arbitrary new regions is deliberately out of scope (would need a long-lived GL context per process — see DESIGN.md §11).
+7. **Stage 12 is read-only.** Tile server + frame PNG endpoints over precomputed Zarrs. No GPU, no GL context. On-demand rendering of arbitrary new regions is deliberately out of scope (would need a long-lived GL context per process — see DESIGN.md §11).
 
 ## Tooling
 
 - **Package manager: `uv`.** `pyproject.toml` + committed `uv.lock`. Don't propose pip, poetry, or conda. Extras: `gpu` (torch, moderngl, pygame), `cloud` (dagster-k8s, dagster-gcp). Dev tooling in `[dependency-groups]`.
 - **Orchestrator: Dagster.** Assets in `orchestration/`. `uv run dagster dev -m orchestration.definitions` for the UI. Don't propose Metaflow, Airflow, or Prefect — Dagster was chosen specifically for the asset-model alignment with Zarr-as-artifact.
 - **Storage: Zarr v3 + xarray + (from stage 07) icechunk.** Always wrap stores in xarray for labelled dimensions.
-- **One Dockerfile at repo root.** Multi-stage uv builder → CUDA runtime + Mesa EGL. Used by stages 06, 08, 09, 10 with different entrypoints. Don't sprawl into per-stage Dockerfiles without a strong reason.
+- **One Dockerfile at repo root.** Multi-stage uv builder → CUDA runtime + Mesa EGL. Used by stages 06, 08, 10, 11, 12 with different entrypoints. Don't sprawl into per-stage Dockerfiles without a strong reason.
 
 ## Repository map
 
 ```
 common/                  # Schedule (canonical zoom path), Zarr schema helpers, colormap
 stages/sNN_<name>/       # One package per stage. Same contract, different implementation.
-  s08_zoom_cloud/        # Single GCE VM with a T4; ship s07 to one cloud machine
-    terraform/           # VM + GCS bucket + attached SA
-  s09_zoom_fanout/       # GKE multi-Pod fan-out, frame range per Pod
+  s08_zoom_cloud_cpu/    # Single cloud VM, CPU kernel — deployable today
+    terraform/           # VM + GCS bucket + attached SA + IAP firewall + budget
+  s09_zoom_fanout_cpu/   # Multi-machine CPU fan-out (placeholder)
+  s10_zoom_cloud_gpu/    # Single cloud VM, GPU kernel (placeholder; GCP quota blocked)
+  s11_zoom_fanout_gpu/   # GKE multi-Pod GPU fan-out, frame range per Pod
     terraform/           # GKE Standard + GPU pool + Workload Identity Federation
     k8s/                 # Pod / Job manifests
     dev/                 # kind cluster config for local plumbing tests
-  s10_viewer_fastapi/    # FastAPI tile server (read-only over precomputed Zarrs)
+  s12_viewer_fastapi/    # FastAPI tile server (read-only over precomputed Zarrs)
 orchestration/           # Dagster: assets, partitions, IOManagers, resources
 render/                  # Zarr → PNG / MP4; gl_context.py and torch_device.py live here
 bench/                   # Aggregate timings across stages; talk-style charts

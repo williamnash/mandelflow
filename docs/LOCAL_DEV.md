@@ -65,47 +65,51 @@ uv run python -m stages.s06_gpu_shader.run
 
 The shader itself is identical across platforms — only the context provider differs.
 
-### Stage 08 — Single GCE VM
+### Stage 08 — Single cloud VM, CPU
 
-The simplest cloud-deployment shape. Local dev for s08 is "exactly what s07 does, but the `--output` is a `gs://` URL." There's no kind cluster, no Dagster K8s executor, no Workload Identity binding — just s07's loop with a remote write target.
+The simplest cloud-deployment shape. Local dev for s08 is "exactly what s07 does, but with s03's CPU kernel and the `--output` is a `gs://` URL." There's no kind cluster, no Dagster K8s executor, no Workload Identity binding — just a multi-frame loop with a remote write target.
 
 You can also run the production shape locally by writing to a local Zarr instead of GCS:
 
 ```bash
-uv run python -m stages.s08_zoom_cloud.run \
+uv run python -m stages.s08_zoom_cloud_cpu.run \
   --n-frames 120 --output out/s08_local.zarr
 ```
 
-When ready to deploy, see `stages/s08_zoom_cloud/README.md` for the VM walkthrough.
+When ready to deploy, see `stages/s08_zoom_cloud_cpu/README.md` for the VM walkthrough.
 
-### Stage 09 — GKE multi-Pod fan-out
+### Stages 09 / 10 — Placeholders
+
+`s09_zoom_fanout_cpu` (multi-CPU cloud, likely Cloud Run Jobs) and `s10_zoom_cloud_gpu` (single GPU cloud VM) are placeholders. Their READMEs cover what they would be when implemented. Both are downstream of s08 being exercised first.
+
+### Stage 11 — GKE multi-Pod GPU fan-out
 
 Three local dev modes, in the order you'll likely use them:
 
 | Mode | What you test | When |
 |---|---|---|
-| Dagster multi-process executor | Asset graph, partition logic, icechunk commit semantics. No K8s at all. | 95% of stage-09 development |
+| Dagster multi-process executor | Asset graph, partition logic, icechunk commit semantics. No K8s at all. | 95% of stage-11 development |
 | `kind` cluster | K8s plumbing — pod specs, RBAC, executor config, IOManager wiring. CPU stub for compute (kind has no GPU on Mac). | Before first real GKE deploy |
 | Real GKE with T4 pool | Final integration + actual GPU rendering. Spend cloud credit sparingly. | Final verification |
 
 Spin up `kind` locally:
 
 ```bash
-kind create cluster --config stages/s09_zoom_fanout/dev/kind-cluster.yaml
-# (Dagster K8s executor scaffolding deploys here once stage 09 is built out.)
+kind create cluster --config stages/s11_zoom_fanout_gpu/dev/kind-cluster.yaml
+# (Dagster K8s executor scaffolding deploys here once stage 11 is built out.)
 kind delete cluster --name mandelflow-dev   # when done
 ```
 
 **Docker Desktop on Mac doesn't pass through the Apple GPU.** A container built for the GKE CUDA pool runs on your Mac via Mesa llvmpipe — very slow. Use that container locally only for "does it compile and start" checks; perf-test only on a real GPU node.
 
-### Stage 10 — FastAPI tile server
+### Stage 12 — FastAPI tile server
 
 ```bash
-uv run uvicorn stages.s10_viewer_fastapi.main:app --reload
+uv run uvicorn stages.s12_viewer_fastapi.main:app --reload
 # http://localhost:8000
 ```
 
-All endpoints are CPU-only — they read a Zarr chunk, apply a colormap, and encode. No GPU, no GL context. Stage 10 reads icechunk repos transparently via `xr.open_zarr`, including time-travel via `/runs/{id}@{commit}/...`.
+All endpoints are CPU-only — they read a Zarr chunk, apply a colormap, and encode. No GPU, no GL context. Stage 12 reads icechunk repos transparently via `xr.open_zarr`, including time-travel via `/runs/{id}@{commit}/...`.
 
 - `GET /runs` — list materialised Zarrs in the configured store root.
 - `GET /runs/{id}/frame/{i}.png` — single frame.

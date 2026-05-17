@@ -1,4 +1,4 @@
-# mandelflow stage 09 — Terraform root.
+# mandelflow stage 11 — Terraform root.
 #
 # Provisions everything needed to fan frame computation across a GKE cluster
 # and write per-frame chunks to GCS. See ../README.md for the deployment

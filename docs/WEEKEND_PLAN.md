@@ -26,16 +26,16 @@ Land these before kicking off Saturday:
 
 ## Sunday — cloud + viewer (~9 hrs)
 
-**Goal by EOD:** Stage 08 running on a single GCE VM with output in `gs://bucket/run.zarr`. Stage 09 (optional) materialising the asset against a GKE cluster with frame ranges fanned across Pods. Stage 10 tile server live on Cloud Run serving frames + slippy-map tiles from a precomputed pyramid. CI green. Repo demoable.
+**Goal by EOD:** Stage 08 (CPU single VM) running on a single GCE VM with output in `gs://bucket/run.zarr`. Stage 11 (optional) materialising the asset against a GKE cluster with GPU Pods. Stage 12 tile server live on Cloud Run serving frames + slippy-map tiles from a precomputed pyramid. CI green. Repo demoable.
 
 | Block | Time | Deliverable |
 |---|---|---|
 | Stage 05 (gpu-torch) | 1h | Single-frame GPU rendering via PyTorch MPS / CUDA. Test on local GPU if available; CI import-tests only. |
 | Stage 06 (gpu-shader) — headless EGL | 2h | Hardest single block of the weekend. Validate the repo-root Dockerfile against ModernGL + EGL on a real GPU node (one-off GCE GPU VM if your Mac isn't enough). First successful headless render inside the container is the milestone. |
-| Stage 08 (zoom-cloud) — Terraform + first run | 1.5h | `terraform apply` provisions: one GCE VM with a T4, GCS bucket, attached service account, Artifact Registry. SSH onto the VM, run the container, write `gs://bucket/run.zarr`. Simplest cloud deployment. |
-| Stage 09 (zoom-fanout) — Terraform GKE | 2h | One `terraform apply` provisions: GKE Standard cluster, GPU node pool (`n1-standard-4` + T4), Workload Identity Federation pool for GitHub OIDC. Outputs paste into GitHub Secrets. |
-| Stage 09 — Dagster K8s executor + GCS IOManager | 1.5h | Swap the executor config; swap `LocalZarrIOManager` → `GCSZarrIOManager`. Materialise the `iterations` asset against the K8s executor; chunks land in `gs://bucket/run.zarr`. *Same asset code as Saturday.* |
-| Stage 10 (viewer-fastapi tile server) | 1.5h | Read-only: `/runs`, `/runs/{id}/frame/{i}.png`, `/tiles/{run_id}/{z}/{x}/{y}.png`. Pure CPU — no GPU, no GL context. Local-first; deploy to Cloud Run (scales to zero). |
+| Stage 08 (zoom-cloud, CPU) — Terraform + first run | 1.5h | `terraform apply` provisions: one GCE VM (CPU), GCS bucket, attached service account, Artifact Registry. SSH onto the VM, run the container, write `gs://bucket/run.zarr`. Simplest cloud deployment. |
+| Stage 11 (zoom-fanout-gpu) — Terraform GKE | 2h | One `terraform apply` provisions: GKE Standard cluster, GPU node pool (`n1-standard-4` + T4), Workload Identity Federation pool for GitHub OIDC. Outputs paste into GitHub Secrets. |
+| Stage 11 — Dagster K8s executor + GCS IOManager | 1.5h | Swap the executor config; swap `LocalZarrIOManager` → `GCSZarrIOManager`. Materialise the `iterations` asset against the K8s executor; chunks land in `gs://bucket/run.zarr`. *Same asset code as Saturday.* |
+| Stage 12 (viewer-fastapi tile server) | 1.5h | Read-only: `/runs`, `/runs/{id}/frame/{i}.png`, `/tiles/{run_id}/{z}/{x}/{y}.png`. Pure CPU — no GPU, no GL context. Local-first; deploy to Cloud Run (scales to zero). |
 | GitHub Actions | 1h | `pr.yml` (lint, pytest stages 00–04, terraform validate, dagster definitions check). `deploy.yml` (Workload Identity auth → build → push → deploy viewer to Cloud Run). |
 | README pass + LinkedIn post | 30 min | Embed bench charts, link to viewer URL + MP4, post draft. |
 | **Tear down** | 15 min | `terraform destroy`. Phone alarm. GPU nodes burn money. |

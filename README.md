@@ -13,7 +13,7 @@ The whole project hangs on one design choice: **the data product is the Zarr sto
 │    frame partitions, │              │    gs://bucket)      │             └──────────────────────┘
 │    IOManagers)       │              │                      │    read     ┌──────────────────────┐
 └──────────────────────┘              │   xarray dataset,    │  ◀────────  │   FastAPI viewer     │
-                                      │   self-describing,   │             │   (stage 09 — read-  │
+                                      │   self-describing,   │             │   (stage 12 — read-  │
                                       │   one per run        │             │   only tile server)  │
                                       └──────────────────────┘             └──────────────────────┘
 
@@ -58,9 +58,11 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for why Zarr, why xarray, why Dagster, wh
 | 05 | `s05_gpu_torch` | PyTorch CUDA / MPS | Raw Zarr (local FS) | 1 frame, 16000×16000 | needs CUDA or MPS |
 | 06 | `s06_gpu_shader` | GLSL via ModernGL (EGL on Linux, hidden window on macOS) | Raw Zarr (local FS) | 1 frame, 16000×16000 | needs OpenGL 4.1+ GPU |
 | 07 | `s07_zoom_local` | Multi-frame zoom on one machine using s06's kernel with shared GL context | **icechunk** (local FS) | 100 frames, 1080p | needs OpenGL 4.1+ GPU |
-| 08 | `s08_zoom_cloud` | Single GCE VM with a T4; s07's loop, output to GCS | Zarr in GCS | 200 frames, 1080p | needs GCP creds |
-| 09 | `s09_zoom_fanout` | GKE multi-Pod fan-out, frame range per Pod | **icechunk** in GCS | 1000 frames, 1080p | needs GCP creds |
-| 10 | `s10_viewer_fastapi` | FastAPI tile server over precomputed Zarrs (frame PNGs + slippy-map tiles) | reads either backend | – | ✓ (CPU-only) |
+| 08 | `s08_zoom_cloud_cpu` | Single GCE VM, CPU kernel (s03); s07's loop, output to GCS | Zarr in GCS | 200 frames, 1080p | needs GCP creds |
+| 09 | `s09_zoom_fanout_cpu` | Multi-machine CPU fan-out (Cloud Run Jobs likely) — placeholder | Zarr in GCS | 1000 frames, 1080p | (not yet built) |
+| 10 | `s10_zoom_cloud_gpu` | Single cloud VM with a GPU, s06 kernel — placeholder (GCP quota blocked) | Zarr in GCS | 200 frames, 1080p | (not yet built) |
+| 11 | `s11_zoom_fanout_gpu` | GKE multi-Pod fan-out, frame range per Pod | **icechunk** in GCS | 1000 frames, 1080p | needs GCP creds |
+| 12 | `s12_viewer_fastapi` | FastAPI tile server over precomputed Zarrs (frame PNGs + slippy-map tiles) | reads either backend | – | ✓ (CPU-only) |
 
 **Reproducibility contract:** every stage marked ✓ must run from `uv sync` followed by `uv run python -m stages.<stage_id>.run` on a stock laptop. Stages requiring GPU or GCP credentials must fail with a single clear line naming the missing prerequisite — never silently, never with a stack trace.
 
@@ -80,8 +82,8 @@ uv run dagster dev -m orchestration.definitions
 # Re-render an existing Zarr with a different colormap
 uv run python -m render.animation runs/2026-05-16.zarr --palette twilight
 
-# Stage 10: tile server over precomputed Zarrs (CPU-only)
-uv run uvicorn stages.s10_viewer_fastapi.main:app
+# Stage 12: tile server over precomputed Zarrs (CPU-only)
+uv run uvicorn stages.s12_viewer_fastapi.main:app
 ```
 
 Developing on macOS? See [`docs/LOCAL_DEV.md`](docs/LOCAL_DEV.md) for stage-by-stage Mac notes (which stages run native, MPS limits, the `kind` cluster for stage-08 plumbing, Docker Desktop's GPU passthrough caveat).
@@ -102,9 +104,11 @@ mandelflow/
 │   ├── s05_gpu_torch/
 │   ├── s06_gpu_shader/
 │   ├── s07_zoom_local/
-│   ├── s08_zoom_cloud/      # Single GCE VM with a T4 + terraform/
-│   ├── s09_zoom_fanout/     # GKE multi-Pod fan-out + terraform/, k8s/, dev/
-│   └── s10_viewer_fastapi/  # FastAPI tile server (read-only)
+│   ├── s08_zoom_cloud_cpu/    # Single cloud VM, CPU kernel — deployable today
+│   ├── s09_zoom_fanout_cpu/   # Multi-machine CPU fan-out — placeholder
+│   ├── s10_zoom_cloud_gpu/    # Single cloud VM, GPU kernel — placeholder
+│   ├── s11_zoom_fanout_gpu/   # GKE multi-Pod GPU fan-out + terraform/, k8s/, dev/
+│   └── s12_viewer_fastapi/    # FastAPI tile server (read-only)
 ├── orchestration/           # Dagster: assets, frame partitions, IOManagers, resources
 ├── render/                  # Zarr → PNG, MP4, side-by-side comparison plots
 ├── bench/                   # Aggregate timings across stages; talk-style charts
@@ -120,9 +124,11 @@ mandelflow/
 - [ ] **Stage 04** — Dask local cluster, one big single-frame render, still raw Zarr.
 - [ ] **Stage 07** — Frame dimension fanned across Dask workers; storage backed by icechunk for transactional parallel writes. First multi-frame animation rendered from a real Zarr.
 - [ ] **Stages 05, 06** — GPU stages. Native on macOS via MPS (stage 05) and a hidden pygame GL context (stage 06); EGL standalone context for Linux containers. Stage 06 (headless EGL in a CUDA container) is the riskiest single step.
-- [ ] **Stage 08** — Single GCE VM with a T4; Terraform provisions the VM, GCS bucket, attached service account; s07's loop runs in the container with output to `gs://bucket/run.zarr`.
-- [ ] **Stage 09** — Terraform GKE Standard + GPU node pool + Workload Identity Federation; frame ranges fanned across Pods via Dagster K8s executor; icechunk repo in `gs://bucket/run.icechunk` via `IcechunkGCSIOManager`.
-- [ ] **Stage 10** — FastAPI tile server over precomputed Zarrs (frame PNGs + slippy-map tiles). Pure CPU; deploys to Cloud Run and scales to zero.
+- [ ] **Stage 08** — Single GCE VM, CPU kernel (s03); Terraform provisions the VM, GCS bucket, attached service account; s07's loop runs in the container with output to `gs://bucket/run.zarr`.
+- [ ] **Stage 09** — Multi-machine CPU fan-out, likely via Cloud Run Jobs running the s04 kernel — placeholder until s08 is exercised.
+- [ ] **Stage 10** — Single cloud VM with a GPU, s06 kernel — placeholder (GCP quota blocked on new project; may target multi-cloud).
+- [ ] **Stage 11** — Terraform GKE Standard + GPU node pool + Workload Identity Federation; frame ranges fanned across Pods via Dagster K8s executor; icechunk repo in `gs://bucket/run.icechunk` via `IcechunkGCSIOManager`.
+- [ ] **Stage 12** — FastAPI tile server over precomputed Zarrs (frame PNGs + slippy-map tiles). Pure CPU; deploys to Cloud Run and scales to zero.
 - [ ] **CI** — `pr.yml` runs stages 00–04 + 07 at small scales; lints Terraform; validates Dagster definitions.
 - [ ] **`bench/`** — aggregate run.json across stages, regenerate the talk-style scaling chart.
 

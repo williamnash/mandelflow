@@ -25,6 +25,13 @@ provider "google" {
   project = var.project_id
   region  = var.region
   zone    = var.zone
+
+  # Some APIs (billingbudgets) bill against a "quota project" rather than
+  # the resource project. Without these two settings, Terraform uses ADC's
+  # default quota project — which is typically the SDK's own internal
+  # project for user creds — and the call fails with SERVICE_DISABLED.
+  billing_project       = var.project_id
+  user_project_override = true
 }
 
 # Enable the APIs the rest of this configuration needs. Idempotent.
@@ -34,6 +41,9 @@ resource "google_project_service" "required_apis" {
     "iam.googleapis.com",                # service accounts
     "storage.googleapis.com",            # GCS bucket
     "artifactregistry.googleapis.com",   # Docker image repo (shared with s09)
+    "cloudbuild.googleapis.com",         # build the image inside GCP, no local Docker
+    "billingbudgets.googleapis.com",     # the $50 budget cap in budget.tf
+    "iap.googleapis.com",                # SSH via Identity-Aware Proxy tunneling
   ])
   service            = each.value
   disable_on_destroy = false

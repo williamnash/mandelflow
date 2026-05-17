@@ -1,16 +1,16 @@
-# Stage 09 — Multi-machine fan-out on GKE
+# Stage 11 — Multi-machine fan-out on GKE, GPU kernel
 
 **Status: scaffold only.** Terraform skeleton + walkthrough; not provisioned, not pushed.
 
-s09 takes s08's "ship s07 to one cloud machine" and scales it across **many machines** by fanning frame ranges across a GKE cluster. Same kernel (s06 shader) running in each Pod, same multi-frame Zarr written to GCS — what's different is **how many machines write to it in parallel**.
+s11 takes [s10](../s10_zoom_cloud_gpu/)'s "single cloud GPU VM" and scales it across **many machines** by fanning frame ranges across a GKE cluster. Same kernel (s06 shader) running in each Pod, same multi-frame Zarr written to GCS — what's different is **how many machines write to it in parallel**.
 
-This is the stage where distributed compute earns its keep. It's also significantly more operational machinery than s08; only graduate here when single-machine throughput is actually the bottleneck.
+This is the stage where distributed compute earns its keep. It's also significantly more operational machinery than s10; only graduate here when single-machine throughput is actually the bottleneck.
 
 ## Frame range per Pod, not frame per Pod
 
 A naive "one Pod per frame" mapping is wrong for our workload: per-Pod startup overhead (Pod schedule + image pull + Python imports + GL context creation) is ~15–50s; per-frame compute is ~5–10ms on a T4. That ratio is ~5,000:1 — startup would dominate everything.
 
-s09 instead **batches a range of frames per Pod**. Each Pod is essentially s07's exact loop bounded to `[frame_start, frame_end)`. The GL context is created once per Pod and reused across all its frames. With 120 frames and 4 Pods, each Pod handles 30 frames in ~3s of real work, amortising its ~25s startup.
+s11 instead **batches a range of frames per Pod**. Each Pod is essentially s07's exact loop bounded to `[frame_start, frame_end)`. The GL context is created once per Pod and reused across all its frames. With 120 frames and 4 Pods, each Pod handles 30 frames in ~3s of real work, amortising its ~25s startup.
 
 | Granularity | # Pods (120 frames) | Wall-clock (parallel) |
 |---|---|---|
@@ -27,8 +27,8 @@ The `--n-pods` argument in `run.py` lets the dispatcher tune this; default of 4 
 | GKE **Standard** cluster | Control plane + node pools | ~$0.10/hr (zonal control plane) |
 | `n1-standard-4` + **T4 GPU** node pool (multi-node) | Compute Pods run here | ~$0.40/hr per node |
 | `e2-standard-2` node pool | Dagster control plane / IO Manager | ~$0.07/hr |
-| **Artifact Registry** (shared with s08) | Docker image repo | pennies |
-| **GCS bucket** (can reuse s08's) | `gs://<bucket>/runs/<id>.zarr` | pennies |
+| **Artifact Registry** (shared with s08/s10) | Docker image repo | pennies |
+| **GCS bucket** (can reuse s08/s10's) | `gs://<bucket>/runs/<id>.zarr` | pennies |
 | **Workload Identity Federation** pool | OIDC trust: GitHub Actions → GCP | free |
 | **Service Accounts** + IAM bindings | Pod → GCS via Workload Identity | free |
 
@@ -38,7 +38,7 @@ The `--n-pods` argument in `run.py` lets the dispatcher tune this; default of 4 
 
 ## Credentials, in order
 
-Three credential paths, vs s08's two — Workload Identity binding is the new one. Mid-step compared to running on a VM with an attached SA, but it's the right pattern for K8s.
+Three credential paths, vs s08/s10's two — Workload Identity binding is the new one. Mid-step compared to running on a VM with an attached SA, but it's the right pattern for K8s.
 
 ### 1. Local Terraform / `gcloud`
 
@@ -68,10 +68,10 @@ The Kubernetes ServiceAccount `compute-sa` (in the `default` namespace) is bound
 #    same-day approval).
 
 # 1. Fill in tfvars
-cp stages/s09_zoom_fanout/terraform/example.tfvars stages/s09_zoom_fanout/terraform/terraform.tfvars
+cp stages/s11_zoom_fanout_gpu/terraform/example.tfvars stages/s11_zoom_fanout_gpu/terraform/terraform.tfvars
 
 # 2. Provision (~10 min for first apply — GKE cluster creation is slow)
-cd stages/s09_zoom_fanout/terraform
+cd stages/s11_zoom_fanout_gpu/terraform
 terraform init
 terraform apply -var-file=terraform.tfvars
 
@@ -90,7 +90,7 @@ docker buildx build --platform linux/amd64 \\
 docker push <region>-docker.pkg.dev/<project>/mandelflow/compute:dev
 
 # 6. Fan out
-python -m stages.s09_zoom_fanout.run \\
+python -m stages.s11_zoom_fanout_gpu.run \\
   --mode dispatch --n-pods 4 \\
   --n-frames 120 --resolution 1080 --max-iter 512 \\
   --output gs://<bucket>/runs/dev.zarr
@@ -121,7 +121,7 @@ Path B requires:
 ## What lives in each subdirectory
 
 ```
-stages/s09_zoom_fanout/
+stages/s11_zoom_fanout_gpu/
 ├── README.md          ← this file
 ├── compute.py         ← re-exports s06's compute_frame (same kernel)
 ├── run.py             ← --mode pod (per-Pod range entrypoint) +
@@ -143,17 +143,17 @@ In rough effort order:
 4. **`GCSIcechunkIOManager`** (or raw Zarr region writes) for parallel-safe per-chunk writes.
 5. **`compute-pod.yaml`** template needs to be parameterised on `frame_start`/`frame_end` instead of `frame_index`.
 
-The scaffolded files mark these with `# TODO(s09):` at the relevant spots.
+The scaffolded files mark these with `# TODO(s11):` at the relevant spots.
 
-## Why s09 still matters even when s08 is enough for the demo
+## Why s11 still matters even when s10 is enough for the demo
 
-s08 is sufficient for shipping a portfolio-grade Mandelbrot zoom video. s09 is the structural lesson:
+s10 (a single GPU VM) is sufficient for shipping a portfolio-grade Mandelbrot zoom video. s11 is the structural lesson:
 
 - **Dask's `Client` + `dask.delayed` from s04 scales to a real cluster.** The same code pattern. Only the cluster connection changes.
 - **Workload Identity (not API keys) is how production cloud compute talks to storage.**
 - **Job-per-partition with right-sized partitions** is the canonical batch-compute pattern. Right-sizing is the engineering judgement.
 
-If you're using this repo as a portfolio piece, s08 is what you demo; s09 is what you explain when someone asks "how would this scale?"
+If you're using this repo as a portfolio piece, s10 is what you demo; s11 is what you explain when someone asks "how would this scale?"
 
 ## Cost cautions
 

@@ -10,3 +10,6 @@ machine_type = "n1-standard-4"
 
 # Must be globally unique. Convention: <project_id>-mandelflow-zarr
 bucket_name = "your-gcp-project-id-mandelflow-zarr"
+
+# Find via: gcloud billing accounts list
+billing_account = "01ABCD-EFGH12-IJKLMN"

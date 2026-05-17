@@ -1,7 +1,7 @@
-"""Stage 09: GKE multi-Pod fan-out — SCAFFOLD.
+"""Stage 11: GKE multi-Pod fan-out — SCAFFOLD.
 
-s09 takes s08's "ship s07 to one cloud machine" and scales it across
-several machines via per-Pod frame ranges. The kernel inside each Pod
+s11 takes s10's "single GPU cloud VM" and scales it across several
+machines via per-Pod frame ranges. The kernel inside each Pod
 is unchanged (s06's GLSL shader); what changes is that N Pods, each
 holding a different frame range, write concurrently into the same
 GCS-backed Zarr.
@@ -24,7 +24,7 @@ Path A (direct K8s submission) is what this file sketches. Path B
 asset graph; it lives in orchestration/definitions.py once that
 module exists.
 
-# TODO(s09): implement.
+# TODO(s11): implement.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ import sys
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Stage 09: GKE fan-out zoom")
+    parser = argparse.ArgumentParser(description="Stage 11: GKE fan-out zoom")
     parser.add_argument(
         "--mode",
         choices=["pod", "dispatch"],
@@ -66,19 +66,19 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     print(
-        f"stage 09 zoom_fanout (SCAFFOLD): mode={args.mode} "
+        f"stage 11 zoom_fanout (SCAFFOLD): mode={args.mode} "
         f"n_frames={args.n_frames} n_pods={args.n_pods} "
         f"resolution={args.resolution} max_iter={args.max_iter}",
         file=sys.stderr,
     )
     print(
-        "Not implemented yet. See stages/s09_zoom_fanout/README.md for "
+        "Not implemented yet. See stages/s11_zoom_fanout_gpu/README.md for "
         "the deployment walkthrough.",
         file=sys.stderr,
     )
     sys.exit(2)
 
-    # TODO(s09): mode == "pod":
+    # TODO(s11): mode == "pod":
     #   - has_gl() preflight (the Pod must have NVIDIA + EGL drivers)
     #   - canonical_schedule(args.n_frames) → full schedule arrays
     #   - slice to [args.frame_start, args.frame_end)
@@ -88,7 +88,7 @@ def main(argv: list[str] | None = None) -> None:
     #       write_frame(args.output, k, iters, ...)        # gs:// path
     #   - tear down context
 
-    # TODO(s09): mode == "dispatch":
+    # TODO(s11): mode == "dispatch":
     #   - import kubernetes
     #   - load_kube_config() (laptop) or load_incluster_config() (in-cluster)
     #   - compute frame ranges:

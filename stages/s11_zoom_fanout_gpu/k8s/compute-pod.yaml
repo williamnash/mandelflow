@@ -3,7 +3,7 @@
 # the output URL.
 #
 # Submit a single Pod manually for plumbing tests:
-#   kubectl apply -f stages/s09_zoom_fanout/k8s/compute-pod.yaml
+#   kubectl apply -f stages/s11_zoom_fanout_gpu/k8s/compute-pod.yaml
 # After it completes, that range's chunks land at gs://<bucket>/runs/<id>.zarr/.
 #
 # The KSA `compute-sa` must be annotated to impersonate the GCP service
@@ -14,7 +14,7 @@
 #   kubectl annotate serviceaccount compute-sa \
 #     iam.gke.io/gcp-service-account=mandelflow-compute@<project>.iam.gserviceaccount.com
 #
-# TODO(s09): bake the KSA + annotation into a Helm chart or kustomization so
+# TODO(s11): bake the KSA + annotation into a Helm chart or kustomization so
 # it's reproducible. For first apply, kubectl is fine.
 
 apiVersion: v1
@@ -38,7 +38,7 @@ spec:
   containers:
     - name: compute
       image: REPLACE_ME-docker.pkg.dev/REPLACE_ME/mandelflow/compute:dev
-      command: ["python", "-m", "stages.s09_zoom_fanout.run"]
+      command: ["python", "-m", "stages.s11_zoom_fanout_gpu.run"]
       args:
         - "--mode=pod"
         - "--frame-start=0"

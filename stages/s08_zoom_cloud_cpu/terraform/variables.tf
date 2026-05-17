@@ -37,3 +37,8 @@ variable "bucket_name" {
   description = "GCS bucket for Zarr outputs. Must be globally unique."
   type        = string
 }
+
+variable "billing_account" {
+  description = "GCP billing account ID for the budget resource (e.g. `01ABCD-EFGH12-IJKLMN`). Find via `gcloud billing accounts list`."
+  type        = string
+}

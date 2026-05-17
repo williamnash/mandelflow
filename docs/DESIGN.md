@@ -36,7 +36,7 @@ Dagster's asset model maps directly onto Zarr-as-data-product:
 
 ## 4. FastAPI is the read layer
 
-Dagster owns the write path; FastAPI owns the read path; the Zarr is the contract between them. Stage 10's service is **read-only over precomputed Zarrs** and exposes:
+Dagster owns the write path; FastAPI owns the read path; the Zarr is the contract between them. Stage 12's service is **read-only over precomputed Zarrs** and exposes:
 
 - `GET /runs` — list materialised Zarrs in the configured store root.
 - `GET /runs/{id}/frame/{i}.png` — read frame `i` from a Zarr, apply colormap, return PNG. Pure I/O + encoding.
@@ -84,13 +84,13 @@ The repo is developed on macOS (Apple Silicon) and deployed in Linux containers 
 - **`gl_context.py`** — `make_offscreen_context()` picks the right offscreen GL backend per platform. macOS uses a hidden pygame window (Apple's OpenGL 4.1 implementation is exactly what the shader targets). Linux containers use `moderngl.create_standalone_context()` with EGL via Mesa.
 - **`torch_device.py`** — `get_torch_device()` picks CUDA → MPS → fail. Stage 05 runs natively on Apple Silicon via MPS, with the float32 limitation (MPS does not support `complex128`).
 
-Stage 09's local development is a layered loop:
+Stage 11's local development is a layered loop:
 
 1. **Multi-process Dagster executor on the laptop** — most asset code is developed here; identical to production except for the executor.
-2. **Local `kind` cluster** (`stages/s09_zoom_fanout/dev/kind-cluster.yaml`) — for K8s plumbing tests: RBAC, pod specs, IOManager wiring. CPU compute (kind has no GPU on Apple Silicon).
+2. **Local `kind` cluster** (`stages/s11_zoom_fanout_gpu/dev/kind-cluster.yaml`) — for K8s plumbing tests: RBAC, pod specs, IOManager wiring. CPU compute (kind has no GPU on Apple Silicon).
 3. **Real GKE with T4 pool** — final integration and actual GPU rendering. Used sparingly.
 
-Stage 08 (single VM) skips all of this — its local dev *is* its production shape, just with a smaller machine. The cluster machinery only arrives at s09 when fan-out earns its keep.
+Stages 08 / 10 (single VM, CPU and GPU) skip all of this — local dev *is* their production shape, just on a smaller machine. The cluster machinery only arrives at s11 when fan-out earns its keep.
 
 The Dagster asset definitions are identical across all three; only the executor config and IOManager change.
 
@@ -114,9 +114,10 @@ See [`LOCAL_DEV.md`](LOCAL_DEV.md) for the per-stage Mac developer checklist.
 Stages 06, 08, 09, and 10 deploy as containers. A single Dockerfile at the repo root produces an image used by all four:
 
 - **Stage 06's headless renderer** in Linux deployments — EGL via Mesa.
-- **Stage 08's single VM** on GCE — CUDA 12 runtime + EGL + the full stack, running one container.
-- **Stage 09's compute Pods** on GKE — same image, fanned across many Pods.
-- **Stage 10's viewer** on Cloud Run — same image, different entrypoint. CPU-only read service; the CUDA / EGL layers in the image go unused for stage 10, but one Dockerfile is simpler than four and the image is pulled once per Cloud Run revision.
+- **Stage 08's single VM** on GCE — runs the CPU kernel today (s03); ready for GPU swap when quota allows.
+- **Stage 10's single VM** on GCE — CUDA 12 runtime + EGL + the full stack (placeholder pending GPU quota).
+- **Stage 11's compute Pods** on GKE — same image, fanned across many Pods.
+- **Stage 12's viewer** on Cloud Run — same image, different entrypoint. CPU-only read service; the CUDA / EGL layers in the image go unused for stage 12, but one Dockerfile is simpler than four and the image is pulled once per Cloud Run revision.
 
 One image keeps the build and deploy surface small. Different entrypoints select compute-worker vs viewer-server behaviour.
 
@@ -129,8 +130,8 @@ Local development does not require Docker — macOS development is native (see [
 Things the architecture *names* but does not yet provide. Called out here so the docs don't oversell.
 
 - **`GCSIcechunkIOManager`.** Referenced throughout but not yet a published package. Needs writing — a thin shim translating Dagster's `IOManager.load_input` / `handle_output` to icechunk session open / commit. Roughly a few hundred lines. Falls back to raw Zarr with `to_zarr(region=...)` if the icechunk integration proves heavier than expected; document the regression if that happens.
-- **GL context lifecycle for any future on-demand rendering.** `render/gl_context.py` creates a fresh context per call. Any long-running process that uses it (e.g. a future render-on-demand service replacing stage 10's tile-only scope) needs a process-lifecycle singleton, not per-request initialisation. Stage 10's tile server avoids this entirely by serving only precomputed tiles.
-- **The tile pyramid generator.** Stage 10 serves `/tiles/{z}/{x}/{y}.png` from a pyramid; the *generator* for that pyramid is its own piece of work — either an output of the compute stage or a downstream Dagster asset that reads the iterations Zarr and writes a pyramid Zarr/icechunk store.
+- **GL context lifecycle for any future on-demand rendering.** `render/gl_context.py` creates a fresh context per call. Any long-running process that uses it (e.g. a future render-on-demand service replacing stage 12's tile-only scope) needs a process-lifecycle singleton, not per-request initialisation. Stage 12's tile server avoids this entirely by serving only precomputed tiles.
+- **The tile pyramid generator.** Stage 12 serves `/tiles/{z}/{x}/{y}.png` from a pyramid; the *generator* for that pyramid is its own piece of work — either an output of the compute stage or a downstream Dagster asset that reads the iterations Zarr and writes a pyramid Zarr/icechunk store.
 
 ## 12. Choosing a compute target
 
@@ -157,9 +158,11 @@ Heuristics in roughly decreasing order of decisiveness:
 | s05 gpu_torch | Dense per-element math, no per-element branching, CUDA available | Per-op dispatch dominates (integrated GPU + tight loop) |
 | s06 gpu_shader | Deep zoom needing long iteration in one kernel, GPU available | Infrastructure cost (EGL setup, container, GPU node) not justified by single-frame need |
 | s07 zoom_local | Many frames on one machine (e.g. laptop with one GPU) | Cluster-grade scale; bottlenecked by single-machine throughput |
-| s08 zoom_cloud | Many frames on **one** cloud machine (simplest cloud deploy) | Need parallelism beyond one VM's throughput |
-| s09 zoom_fanout | Many frames across many machines (GKE) | Per-frame work so cheap that K8s scheduling cost dominates |
-| s10 viewer_fastapi | Serving precomputed regions over the network | Computing new regions on demand (deliberately out of scope) |
+| s08 zoom_cloud_cpu | One cloud machine, CPU (simplest cloud deploy) | Need parallelism or GPU |
+| s09 zoom_fanout_cpu | Many cloud CPU machines (Cloud Run Jobs likely) | Per-frame work too cheap to amortise fan-out overhead |
+| s10 zoom_cloud_gpu | One cloud machine, GPU (placeholder) | Need cross-machine throughput |
+| s11 zoom_fanout_gpu | Many cloud GPU machines (GKE) | Per-frame work so cheap that K8s scheduling cost dominates |
+| s12 viewer_fastapi | Serving precomputed regions over the network | Computing new regions on demand (deliberately out of scope) |
 
 ### The general principle
 

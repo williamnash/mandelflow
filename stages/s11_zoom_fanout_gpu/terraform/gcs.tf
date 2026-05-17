@@ -18,7 +18,7 @@ resource "google_storage_bucket" "zarr_outputs" {
   force_destroy = true
 
   # 30-day lifecycle move to nearline once we're keeping older runs around.
-  # TODO(s09): enable this when we have runs worth archiving.
+  # TODO(s11): enable this when we have runs worth archiving.
   # lifecycle_rule {
   #   condition { age = 30 }
   #   action {

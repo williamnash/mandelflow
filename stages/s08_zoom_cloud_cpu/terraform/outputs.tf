@@ -8,9 +8,9 @@ output "vm_zone" {
   description = "Pass to `gcloud compute ssh --zone`."
 }
 
-output "vm_external_ip" {
-  value       = google_compute_instance.mandelflow_vm.network_interface[0].access_config[0].nat_ip
-  description = "Ephemeral public IP of the VM."
+output "ssh_command" {
+  value       = "gcloud compute ssh ${google_compute_instance.mandelflow_vm.name} --zone=${google_compute_instance.mandelflow_vm.zone} --tunnel-through-iap"
+  description = "Copy-paste to SSH onto the VM. No public IP; IAP tunnel only."
 }
 
 output "zarr_bucket" {
