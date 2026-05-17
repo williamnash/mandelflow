@@ -41,7 +41,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         mesa-utils \
         ffmpeg \
         ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ # uv's venv symlinks `python` → /usr/local/bin/python3 (the builder image's
+ # Python path); the apt install above puts Python at /usr/bin/python3.12.
+ # Add the compatibility symlink so the copied venv resolves cleanly. See
+ # docs/CLOUD_SETUP.md gotcha #6.
+ && ln -sf /usr/bin/python${PYTHON_VERSION} /usr/local/bin/python3
 
 WORKDIR /app
 

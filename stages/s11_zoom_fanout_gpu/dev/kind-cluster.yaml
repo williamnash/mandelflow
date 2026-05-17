@@ -5,7 +5,7 @@
 # Use this cluster to validate Dagster K8s executor + IOManager wiring,
 # pod specs, and RBAC — NOT for perf testing the actual compute.
 #
-# Spin up:   kind create cluster --config stages/s08_zoom_cloud/dev/kind-cluster.yaml
+# Spin up:   kind create cluster --config stages/s11_zoom_fanout_gpu/dev/kind-cluster.yaml
 # Tear down: kind delete cluster --name mandelflow-dev
 
 kind: Cluster

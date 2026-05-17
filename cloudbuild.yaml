@@ -1,31 +1,41 @@
 # Cloud Build config for the mandelflow compute image.
 #
-# The repo's Dockerfile uses BuildKit syntax (#syntax directive and
-# --mount=type=cache for the uv cache layer). Cloud Build's default Docker
-# builder doesn't enable BuildKit, so we set DOCKER_BUILDKIT=1 explicitly.
-#
 # Submit with:
 #   gcloud builds submit --config cloudbuild.yaml --region us-central1 .
+#
+# Optimisations applied (see docs/CLOUD_SETUP.md for the full ranked list):
+#
+#   #1  Registry-backed BuildKit layer cache. A `:cache` tag stores
+#       every layer; subsequent builds with the same pyproject.toml +
+#       uv.lock skip the slow `uv sync` step entirely. ~3-4 min off
+#       every build after the first.
+#
+#   #2  E2_HIGHCPU_8 machine (8 vCPU vs default 2). ~30% faster
+#       wall-clock for CPU-bound steps like `uv sync`. Still within
+#       Cloud Build's 120 free min/day for this machine class.
 
 steps:
   - name: 'gcr.io/cloud-builders/docker'
-    env:
-      - 'DOCKER_BUILDKIT=1'
+    entrypoint: 'bash'
     args:
-      - 'build'
-      - '-t'
-      - 'us-central1-docker.pkg.dev/$PROJECT_ID/mandelflow/compute:dev'
-      - '.'
+      - '-c'
+      - |
+        set -e
+        # buildx with docker-container driver is required for registry cache.
+        docker buildx create --use --name builder --driver docker-container
 
-images:
-  - 'us-central1-docker.pkg.dev/$PROJECT_ID/mandelflow/compute:dev'
+        docker buildx build \
+          --cache-from=type=registry,ref=us-central1-docker.pkg.dev/$PROJECT_ID/mandelflow/compute:cache \
+          --cache-to=type=registry,ref=us-central1-docker.pkg.dev/$PROJECT_ID/mandelflow/compute:cache,mode=max \
+          -t us-central1-docker.pkg.dev/$PROJECT_ID/mandelflow/compute:dev \
+          --push \
+          .
 
-# Default Cloud Build machine is small (e2-medium). A CUDA image with the
-# torch/numba install is ~3GB and takes ~10-15 min on the default. If you
-# want faster iteration, uncomment the larger machine:
-# options:
-#   machineType: E2_HIGHCPU_8
+# buildx pushed `:dev` and `:cache` directly via `--push`; no `images:` block.
 
-# Build itself takes longer than the default 10-min timeout for first build
-# (image layers pull from scratch). 30 min is plenty.
+options:
+  machineType: E2_HIGHCPU_8
+
+# First build takes ~10 min (no cache yet). Cached builds run in ~1-2 min.
+# 30 min timeout is plenty of headroom.
 timeout: '1800s'

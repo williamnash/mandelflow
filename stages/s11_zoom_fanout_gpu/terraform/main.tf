@@ -24,7 +24,7 @@ terraform {
   # fine; create the bucket, then move state via `terraform init -migrate-state`.
   # backend "gcs" {
   #   bucket = "<project-id>-tfstate"
-  #   prefix = "stages/s08_zoom_cloud"
+  #   prefix = "stages/s11_zoom_fanout_gpu"
   # }
 }
 

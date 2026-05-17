@@ -6,14 +6,14 @@ Runs s07's loop shape with two adjustments for cloud:
      gcsfs handle that transparently; `common/store.py` doesn't need to
      know which backend it's hitting.
   2. No GL context is acquired — the compute kernel imported from
-     `stages.s08_zoom_cloud.compute` is currently s03 (CPU numba),
+     `stages.s08_zoom_cloud_cpu.compute` is currently s03 (CPU numba),
      not s06 (GPU shader), pending GPU quota approval.
 
 End-to-end run inside the VM container:
 
     docker run \\
       us-central1-docker.pkg.dev/mandelflow-2026/mandelflow/compute:dev \\
-      python -m stages.s08_zoom_cloud.run \\
+      python -m stages.s08_zoom_cloud_cpu.run \\
         --n-frames 60 --resolution 480 --max-iter 256 \\
         --output gs://mandelflow-2026-zarr/runs/dev.zarr
 
@@ -30,7 +30,7 @@ from pathlib import Path
 
 from common.schedule import canonical_schedule
 from common.store import create_iterations_dataset, write_frame
-from stages.s08_zoom_cloud.compute import compute_frame
+from stages.s08_zoom_cloud_cpu.compute import compute_frame
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -8,7 +8,7 @@
 #   - machine_type → "n1-standard-4"
 #   - image → "common-cu129-ubuntu-2204-nvidia-580" (DLVM)
 #   - scheduling.on_host_maintenance → "TERMINATE"
-#   - stages/s08_zoom_cloud/compute.py → import from s06_gpu_shader
+#   - stages/s08_zoom_cloud_cpu/compute.py → import from s06_gpu_shader
 
 resource "google_compute_instance" "mandelflow_vm" {
   name         = var.vm_name

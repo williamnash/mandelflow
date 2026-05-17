@@ -311,6 +311,7 @@ As of 2026-05-17:
 | `default-allow-ssh` | deleted |
 | Budget alert | $50 cap with $10/$50 thresholds |
 | GPU quota | denied 2026-05-17, can resubmit 2026-05-19 |
-| Image runnable | NO — Dockerfile Python symlink issue (Gotcha #6) |
+| Image runnable | initially NO (Gotcha #6); fixed in Dockerfile, requires rebuild |
+| Code executed end-to-end on the VM | **NO** — we got as far as the container starting but `exec python` failed. The Dockerfile fix has been applied; rebuild + re-run needed to actually validate. |
 
 To pick up from here on a future session: read this doc top-to-bottom; the playbook order is the order the steps should run.
