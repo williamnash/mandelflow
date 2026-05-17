@@ -16,6 +16,7 @@ from common.testing import assert_iterations_close
 from stages.s00_naive.compute import compute_frame as s00_compute
 from stages.s01_numpy.compute import compute_frame as s01_compute
 from stages.s02_numba.compute import compute_frame as s02_compute
+from stages.s03_numba_opt.compute import compute_frame as s03_compute
 
 _PARAMS = dict(
     center_re=-0.75,
@@ -30,8 +31,9 @@ EXACT_STAGES = [
     pytest.param(s02_compute, id="s02_numba"),
 ]
 
-# Stages with fastmath land here once they exist.
-FASTMATH_STAGES: list[pytest.param] = []
+FASTMATH_STAGES = [
+    pytest.param(s03_compute, id="s03_numba_opt"),
+]
 
 
 @pytest.mark.parametrize("compute_frame", EXACT_STAGES)
