@@ -28,7 +28,7 @@ Cross-reference: [`docs/GOTCHAS.md`](GOTCHAS.md) covers code-side gotchas; this 
 gcloud projects create mandelflow-2026 --name="mandelflow"
 
 # Link a billing account (find ID via: gcloud billing accounts list)
-gcloud billing projects link mandelflow-2026 --billing-account=***REDACTED-BILLING-ID***
+gcloud billing projects link mandelflow-2026 --billing-account=<your-billing-account-id>
 
 # Set as active
 gcloud config set project mandelflow-2026
