@@ -1,16 +1,28 @@
-"""End-to-end: stage 01's CLI writes a valid Zarr."""
+"""Each stage's CLI writes a valid single-frame Zarr.
+
+Exercises argparse + the stage's `compute_frame` + `common.store` end
+to end. Add new stages by appending to STAGE_CLIS.
+"""
 
 from __future__ import annotations
 
+import pytest
 import xarray as xr
 
 from common.store import ITERATIONS_DTYPE
-from stages.s01_numpy.run import main
+from stages.s00_naive.run import main as s00_main
+from stages.s01_numpy.run import main as s01_main
+
+STAGE_CLIS = [
+    pytest.param(s00_main, id="s00_naive"),
+    pytest.param(s01_main, id="s01_numpy"),
+]
 
 
-def test_cli_writes_valid_zarr(tmp_path):
-    out = tmp_path / "s01.zarr"
-    main([
+@pytest.mark.parametrize("cli_main", STAGE_CLIS)
+def test_cli_writes_valid_zarr(cli_main, tmp_path):
+    out = tmp_path / "stage.zarr"
+    cli_main([
         "--center-re", "-0.75",
         "--center-im", "0.0",
         "--width", "3.5",
