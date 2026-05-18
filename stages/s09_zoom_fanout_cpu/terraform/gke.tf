@@ -15,6 +15,15 @@ resource "google_container_cluster" "mandelflow" {
   remove_default_node_pool = true
   initial_node_count       = 1
 
+  # GKE defaults `deletion_protection` to true on newer providers. For a
+  # teaching repo with frequent up/down cycles, this fights us — terraform
+  # destroy refuses with a "deletion_protection is set" error and requires
+  # a manual `gcloud container clusters update --no-deletion-protection`
+  # before retry. Explicitly set to false so terraform destroy works.
+  # For a production cluster, leave at default (true) and use `terraform
+  # state rm` if you really need to destroy.
+  deletion_protection = false
+
   workload_identity_config {
     workload_pool = "${var.project_id}.svc.id.goog"
   }
