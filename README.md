@@ -10,7 +10,7 @@ The whole project hangs on one design choice: **the data product is the Zarr sto
 ┌──────────────────────┐   compute    ┌──────────────────────┐    read     ┌──────────────────────┐
 │   Dagster            │  ────────▶   │   Zarr store         │  ◀────────  │   render/  (PNGs,    │
 │   (asset model,      │              │   (local FS or       │             │   MP4, comparisons)  │
-│    frame partitions, │              │    gs://bucket)      │             └──────────────────────┘
+│    pod partitions,   │              │    gs://bucket)      │             └──────────────────────┘
 │    IOManagers)       │              │                      │    read     ┌──────────────────────┐
 └──────────────────────┘              │   xarray dataset,    │  ◀────────  │   FastAPI viewer     │
                                       │   self-describing,   │             │   (stage 12 — read-  │
@@ -109,7 +109,7 @@ mandelflow/
 │   ├── s10_zoom_cloud_gpu/    # Single cloud VM, GPU kernel — placeholder
 │   ├── s11_zoom_fanout_gpu/   # GKE multi-Pod GPU fan-out + terraform/, k8s/, dev/
 │   └── s12_viewer_fastapi/    # FastAPI tile server (read-only)
-├── orchestration/           # Dagster: assets, frame partitions, IOManagers, resources
+├── orchestration/           # Dagster: assets, pod partitions, IOManagers, resources
 ├── render/                  # Zarr → PNG, MP4, side-by-side comparison plots
 ├── bench/                   # Aggregate timings across stages; talk-style charts
 └── docs/                    # DESIGN.md (the why), WEEKEND_PLAN.md, GOTCHAS.md
