@@ -43,6 +43,18 @@ variable "gpu_node_count" {
   default     = 0
 }
 
+variable "cpu_min_nodes" {
+  description = "Minimum CPU pool size — kept low so the cluster idle bill stays small."
+  type        = number
+  default     = 1
+}
+
+variable "cpu_max_nodes" {
+  description = "Maximum CPU pool size during fan-out. One node hosts ~one fan-out Pod, so set this >= MANDELFLOW_N_PODS for the workload you're targeting."
+  type        = number
+  default     = 8
+}
+
 variable "bucket_name" {
   description = "GCS bucket for Zarr outputs. Must be globally unique."
   type        = string

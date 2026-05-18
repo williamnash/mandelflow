@@ -28,12 +28,23 @@ resource "google_container_cluster" "mandelflow" {
   ]
 }
 
-# Small CPU pool for Dagster control plane, IO Managers, and any non-compute Pods.
+# CPU pool. Autoscales 1..max during the run, scales back to 1 when idle
+# so the cluster has somewhere to host system Pods (DNS, metrics-server,
+# Dagster control plane if/when added) but isn't paying for fan-out
+# capacity between runs.
+#
+# Each Pod requests 1–2 vCPU; e2-standard-2 fits one fan-out Pod plus a
+# small amount of system overhead per node. With max 8 nodes we can run
+# our default n_pods=8 with one Pod per node, in parallel.
 resource "google_container_node_pool" "cpu_pool" {
-  name       = "cpu-pool"
-  cluster    = google_container_cluster.mandelflow.id
-  location   = var.region
-  node_count = 1
+  name     = "cpu-pool"
+  cluster  = google_container_cluster.mandelflow.id
+  location = var.region
+
+  autoscaling {
+    min_node_count = var.cpu_min_nodes
+    max_node_count = var.cpu_max_nodes
+  }
 
   node_config {
     machine_type = "e2-standard-2"

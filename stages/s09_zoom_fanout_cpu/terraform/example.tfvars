@@ -13,6 +13,11 @@ github_repo  = "mandelflow"
 # Set to the same value used in stages/s08_zoom_cloud_cpu/terraform/terraform.tfvars.
 bucket_name = "your-gcp-project-id-mandelflow-zarr"
 
+# CPU node pool autoscaling. min stays at 1 for the system Pods;
+# max should be >= MANDELFLOW_N_PODS for the largest workload you plan to run.
+cpu_min_nodes = 1
+cpu_max_nodes = 8
+
 # Default 0 = CPU-only cluster (s09).
 # Set to 1+ to add the T4 GPU pool (s11). T4 quota in `zone` is required.
 gpu_node_count   = 0
