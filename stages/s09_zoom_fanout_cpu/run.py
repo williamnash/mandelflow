@@ -154,6 +154,7 @@ def run_task(task_index: int, task_count: int) -> None:
     print(f"  {describe(cfg)}", flush=True)
     print(f"  output: {output}", flush=True)
 
+    import icechunk
     repo = _open_repo(output)
     # Defensive: in cloud the dispatcher initialises the schema before
     # fan-out so this is a no-op. Local validation (running tasks one
@@ -191,9 +192,24 @@ def run_task(task_index: int, task_count: int) -> None:
             f"({time.perf_counter() - t_frame:.2f}s)",
             flush=True,
         )
-    snapshot = session.commit(
-        f"task {task_index}/{task_count}: frames {start:04d}..{end - 1:04d}"
-    )
+    # Concurrent commit semantics: another Pod may have advanced `main`
+    # while we were computing. Disjoint region writes (each Pod owns a
+    # distinct frame range = distinct chunks) are mergeable, so rebase
+    # + retry resolves cleanly. Retry up to 10 times — for n_pods up to
+    # ~20 this is comfortable headroom.
+    commit_msg = f"task {task_index}/{task_count}: frames {start:04d}..{end - 1:04d}"
+    for attempt in range(10):
+        try:
+            snapshot = session.commit(commit_msg)
+            break
+        except icechunk.ConflictError:
+            if attempt == 9:
+                raise
+            session.rebase(icechunk.BasicConflictSolver())
+            print(
+                f"  task {task_index}: rebase+retry commit (attempt {attempt + 2})",
+                flush=True,
+            )
     commit_short = snapshot[:8] if isinstance(snapshot, str) else str(snapshot)[:8]
     elapsed = time.perf_counter() - t_start
     print(
