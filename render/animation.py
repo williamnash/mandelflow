@@ -27,6 +27,29 @@ import xarray as xr
 from PIL import Image
 
 
+def _open_dataset(path: str | Path) -> xr.Dataset:
+    """Open an iterations dataset from raw Zarr or an icechunk repo.
+
+    Detects icechunk by the `.icechunk` suffix on the path. Both backends
+    expose an xarray-compatible Zarr store; the only difference is how we
+    obtain it (raw-zarr opens directly; icechunk opens a readonly session
+    on the `main` branch and uses its store).
+    """
+    path_str = str(path).rstrip("/")
+    if path_str.endswith(".icechunk"):
+        import icechunk
+        if path_str.startswith("gs://"):
+            parts = path_str[5:].split("/", 1)
+            bucket = parts[0]
+            prefix = parts[1] if len(parts) > 1 else ""
+            storage = icechunk.gcs_storage(bucket=bucket, prefix=prefix)
+        else:
+            storage = icechunk.local_filesystem_storage(path_str)
+        repo = icechunk.Repository.open(storage)
+        return xr.open_zarr(repo.readonly_session("main").store)
+    return xr.open_zarr(path_str)
+
+
 def render_zarr_to_mp4(
     zarr_path: str | Path,
     output_path: str | Path,
@@ -43,8 +66,14 @@ def render_zarr_to_mp4(
 
     `crf` controls quality: 17 ≈ visually lossless, 23 = ffmpeg
     default, 28 = noticeable artifacts. Lower = bigger file.
+
+    Accepts both raw Zarr stores and icechunk repos. Path types:
+      - `path/to/run.zarr`            → raw Zarr (local FS)
+      - `gs://bucket/run.zarr`        → raw Zarr in GCS
+      - `path/to/run.icechunk`        → icechunk repo (local FS)
+      - `gs://bucket/run.icechunk`    → icechunk repo in GCS
     """
-    ds = xr.open_zarr(zarr_path)
+    ds = _open_dataset(zarr_path)
     n_frames = ds.sizes["frame"]
     if n_frames < 1:
         raise ValueError(f"Zarr {zarr_path} has no frames.")
@@ -89,7 +118,9 @@ def render_zarr_to_mp4(
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Render a multi-frame Zarr to MP4")
-    parser.add_argument("--input", type=Path, required=True)
+    # Input is `str` not `Path` so argparse doesn't collapse `gs://...` to
+    # `gs:/...` (Path's path-normalisation rule).
+    parser.add_argument("--input", type=str, required=True)
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--fps", type=int, default=30,
                         help="Frame rate. Lower = slower playback. 24 = cinematic, 30 = standard, 60 = smooth.")
@@ -100,7 +131,14 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     if args.output is None:
-        args.output = args.input.with_suffix(".mp4")
+        # Derive output filename from input — strip URL prefix + scheme,
+        # take the basename, swap suffix to .mp4.
+        stem = Path(args.input.rstrip("/")).name
+        if stem.endswith(".icechunk"):
+            stem = stem[: -len(".icechunk")]
+        elif stem.endswith(".zarr"):
+            stem = stem[: -len(".zarr")]
+        args.output = Path(f"out/{stem}.mp4")
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"animation: {args.input}")
