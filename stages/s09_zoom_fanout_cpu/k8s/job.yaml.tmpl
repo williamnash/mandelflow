@@ -1,0 +1,74 @@
+# Indexed-Job template for mandelflow's cloud CPU/GPU fan-out.
+#
+# An "Indexed" Job spawns N=completions Pods, each assigned a unique
+# JOB_COMPLETION_INDEX env var (0..N-1) by the Job controller. Our task
+# code (stages/s09_zoom_fanout_cpu/run.py) reads that index plus
+# JOB_COMPLETIONS (which we inject below) to compute its frame range.
+#
+# Same shape for CPU and GPU. The dispatcher renders this template
+# twice: once with TOLERATIONS + GPU_RESOURCE_LIMIT empty (CPU pool),
+# once with them filled in (GPU pool). Nothing else differs.
+#
+# Rendered by str.format() in stages/s09_zoom_fanout_cpu/run.py.
+# Placeholders (double-braced here so str.format leaves them in this header):
+#   {{JOB_NAME}}            unique per dispatch (timestamp suffix)
+#   {{NAMESPACE}}           K8s namespace
+#   {{N_PODS}}              completions == parallelism
+#   {{IMAGE}}               container image URL
+#   {{SERVICE_ACCOUNT}}     KSA name (Workload Identity binding)
+#   {{ENV_BLOCK}}           pre-rendered list of MANDELFLOW_* env entries
+#   {{TOLERATIONS}}         empty for CPU; GPU toleration block for GPU
+#   {{GPU_RESOURCE_LIMIT}}  empty for CPU; nvidia.com/gpu limit for GPU
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {JOB_NAME}
+  namespace: {NAMESPACE}
+  labels:
+    app: mandelflow
+    component: compute
+spec:
+  completionMode: Indexed
+  completions: {N_PODS}
+  parallelism: {N_PODS}
+  # backoffLimit 0: a Pod failure stops the whole batch. Easier to
+  # diagnose during development than letting failed slices retry and
+  # the rest succeed silently. Bump to 2-3 for production batch runs.
+  backoffLimit: 0
+  # Pods drop their ephemeral state when the Job is deleted; logs are
+  # kept for 1h via ttlSecondsAfterFinished (manual cleanup otherwise).
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: mandelflow
+        component: compute
+    spec:
+      serviceAccountName: {SERVICE_ACCOUNT}
+      restartPolicy: Never
+{TOLERATIONS}
+      containers:
+      - name: compute
+        image: {IMAGE}
+        imagePullPolicy: Always
+        command: ["python", "-m", "stages.s09_zoom_fanout_cpu.run"]
+        env:
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        # The Indexed Job controller auto-injects JOB_COMPLETION_INDEX.
+        # JOB_COMPLETIONS is our convention — the task uses it to know
+        # the total task count without needing a downward-API hop.
+        - name: JOB_COMPLETIONS
+          value: "{N_PODS}"
+        # Workload-config env vars forwarded from the dispatcher's
+        # environment so each Pod re-loads RunConfig.from_env() with
+        # the same preset / overrides the dispatcher saw.
+{ENV_BLOCK}
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+          limits:
+            cpu: "2"
+            memory: "4Gi"
+{GPU_RESOURCE_LIMIT}

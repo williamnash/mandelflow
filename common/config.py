@@ -115,5 +115,25 @@ def describe(cfg: RunConfig) -> str:
     )
 
 
+def frame_range_for_pod(
+    pod_index: int, n_pods: int, n_frames: int
+) -> tuple[int, int]:
+    """Inclusive-exclusive frame range owned by `pod_index`.
+
+    Frames are distributed as evenly as possible across `n_pods` Pods;
+    the first `n_frames % n_pods` Pods pick up one extra frame each
+    when `n_frames` doesn't divide. Same arithmetic as numpy.array_split.
+
+    This is the only sharding rule. All fan-out paths (Dagster's
+    multiprocess + k8s_job_executor, Cloud Run Jobs, K8s Indexed Jobs)
+    use it so a Pod can compute its own frame range from just (index,
+    total, n_frames) without needing a coordinator.
+    """
+    base, rem = divmod(n_frames, n_pods)
+    start = pod_index * base + min(pod_index, rem)
+    end = start + base + (1 if pod_index < rem else 0)
+    return start, end
+
+
 # Hint to suppress unused-import warnings when downstream re-exports fields().
 _ = fields

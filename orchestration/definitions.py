@@ -50,7 +50,7 @@ from dagster import (
     multiprocess_executor,
 )
 
-from common.config import RunConfig, describe, from_env
+from common.config import RunConfig, describe, frame_range_for_pod, from_env
 from common.schedule import canonical_schedule
 from common.store import ITERATIONS_DTYPE, create_iterations_dataset, write_frame
 
@@ -85,18 +85,8 @@ pod_partitions = StaticPartitionsDefinition(
 
 
 def _frame_range_for_pod(pod_idx: int, cfg: RunConfig = CFG) -> tuple[int, int]:
-    """Inclusive-exclusive frame range owned by `pod_idx`.
-
-    Frames are distributed as evenly as possible across `cfg.n_pods` Pods;
-    the last few Pods may pick up one extra frame each when `n_frames`
-    doesn't divide. Same arithmetic as `numpy.array_split`.
-    """
-    n_frames = cfg.n_frames
-    n_pods = cfg.n_pods
-    base, rem = divmod(n_frames, n_pods)
-    start = pod_idx * base + min(pod_idx, rem)
-    end = start + base + (1 if pod_idx < rem else 0)
-    return start, end
+    """Backwards-compat wrapper around common.config.frame_range_for_pod."""
+    return frame_range_for_pod(pod_idx, cfg.n_pods, cfg.n_frames)
 
 
 class ZarrFrameIOManager(ConfigurableIOManager):
