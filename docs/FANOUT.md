@@ -75,22 +75,31 @@ This is the lesson behind `stages/s11_zoom_fanout_gpu/README.md`'s warning:
 > Per-Pod startup overhead is ~15–50s; per-frame compute is ~5–10ms on
 > a T4. That ratio is ~5,000:1 — startup would dominate everything.
 
-### The right shape: frame-range-per-Pod
+### The right shape: frame-set-per-Pod
 
 Instead of partitioning by frame, partition by **Pod**. Each partition
 is "Pod *i* of *K*", and each Pod's asset code internally loops over
-its contiguous frame range:
+its stride-sharded frame set:
 
 ```python
 @asset(partitions_def=pod_partitions, ...)
 def iterations(context):
     pod_idx = int(context.partition_key)
-    start, end = _frame_range_for_pod(pod_idx)   # e.g. pod 3 of 8: [225..300)
+    frames = frame_indices_for_pod(pod_idx, n_pods, n_frames)  # pod 3 of 8: 3, 11, 19, …
     out = {}
-    for k in range(start, end):
+    for k in frames:
         out[k] = compute_frame(cr[k], ci[k], w[k], ...)
     return out   # dict[frame_idx → ndarray]
 ```
+
+Why strided rather than contiguous ranges: per-frame cost grows steeply
+with zoom depth (~66× first→last frame measured with the s03 kernel on
+the canonical schedule), so contiguous ranges hand the whole deep tail to
+the last Pod and its wall-clock bounds the run — portfolio-003 measured a
+17× imbalance (Pod 0: 58 s, Pod 3: ~17 min). Striding gives every Pod a
+shallow-to-deep mix; under a monotone cost curve loads even out within a
+few percent. Region writes stay disjoint (one frame = one chunk), so the
+storage architecture is unchanged.
 
 A Pod now does many frames in one lifetime. Concretely for our targets
 (see `common/config.py`); per-frame numbers are *measured* for portfolio

@@ -50,7 +50,7 @@ from dagster import (
     multiprocess_executor,
 )
 
-from common.config import RunConfig, describe, frame_range_for_pod, from_env
+from common.config import RunConfig, describe, frame_indices_for_pod, from_env
 from common.schedule import canonical_schedule
 from common.store import ITERATIONS_DTYPE, create_iterations_dataset, write_frame
 
@@ -84,9 +84,10 @@ pod_partitions = StaticPartitionsDefinition(
 )
 
 
-def _frame_range_for_pod(pod_idx: int, cfg: RunConfig = CFG) -> tuple[int, int]:
-    """Backwards-compat wrapper around common.config.frame_range_for_pod."""
-    return frame_range_for_pod(pod_idx, cfg.n_pods, cfg.n_frames)
+def _frame_indices_for_pod(pod_idx: int, cfg: RunConfig = CFG) -> list[int]:
+    """Stride sharding via common.config.frame_indices_for_pod — every Pod
+    gets a shallow-to-deep mix so the deep tail doesn't bound the makespan."""
+    return frame_indices_for_pod(pod_idx, cfg.n_pods, cfg.n_frames)
 
 
 class ZarrFrameIOManager(ConfigurableIOManager):
@@ -348,23 +349,26 @@ def _select_io_manager():
 
 @asset(partitions_def=pod_partitions, io_manager_key="zarr_io")
 def iterations(context) -> dict[int, np.ndarray]:
-    """One Pod's contiguous range of frames.
+    """One Pod's stride-sharded set of frames.
 
-    Partition key is the Pod index; the Pod owns a contiguous frame range
-    computed via `_frame_range_for_pod`. Frames are computed sequentially
-    within the Pod (sharing kernel state — e.g. one GL context across all
-    frames for the GPU kernel), and returned as a dict the IOManager
-    writes to storage.
+    Partition key is the Pod index; the Pod owns frames `pod_idx,
+    pod_idx + n_pods, …` via `_frame_indices_for_pod` (strided, not
+    contiguous — deep frames cost up to ~66× shallow ones, so contiguous
+    ranges leave the deep Pod bounding the makespan). Frames are computed
+    sequentially within the Pod (sharing kernel state — e.g. one GL
+    context across all frames for the GPU kernel), and returned as a dict
+    the IOManager writes to storage.
     """
     pod_idx = int(context.partition_key)
-    start, end = _frame_range_for_pod(pod_idx)
+    frames = _frame_indices_for_pod(pod_idx)
     cr, ci, w = canonical_schedule(CFG.n_frames, CFG.initial_width, CFG.final_width)
     context.log.info(
-        f"pod {pod_idx}/{CFG.n_pods}: frames [{start}..{end}) — "
+        f"pod {pod_idx}/{CFG.n_pods}: {len(frames)} frames "
+        f"(stride {CFG.n_pods} from {frames[0] if frames else '-'}) — "
         f"{describe(CFG)}"
     )
     out: dict[int, np.ndarray] = {}
-    for k in range(start, end):
+    for k in frames:
         out[k] = compute_frame(
             float(cr[k]), float(ci[k]), float(w[k]),
             CFG.resolution, CFG.max_iter,

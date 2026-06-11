@@ -52,7 +52,12 @@ should have no NaN.
 
 ## P1 — quick wins / showcase blockers
 
-### 2. Linear contiguous sharding is unbalanced for deep-zoom workloads
+### 2. ✅ DONE — Linear contiguous sharding is unbalanced for deep-zoom workloads
+
+> Implemented as `common/config.py::frame_indices_for_pod` (stride
+> sharding), wired into `run_task` and the Dagster `iterations` asset;
+> unit-tested in `tests/unit/common/test_config.py`. Original writeup
+> kept below for the record.
 
 **Discovered:** portfolio-003 wall-clock was 21 min total. Pod 0 finished
 in 58 s; Pod 3 took ~17 min. **17× imbalance.**

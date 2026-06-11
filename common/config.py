@@ -143,5 +143,26 @@ def frame_range_for_pod(
     return start, end
 
 
+def frame_indices_for_pod(
+    pod_index: int, n_pods: int, n_frames: int
+) -> list[int]:
+    """Stride-sharded frame indices owned by `pod_index`: i, i+k, i+2k, …
+
+    The sharding rule for zoom workloads. Contiguous ranges
+    (`frame_range_for_pod`) are pathologically unbalanced on a zoom
+    schedule — per-frame cost grows with depth (~66× first→last frame
+    with the s03 kernel; portfolio-003 measured a 17× pod wall-clock
+    imbalance), so the pod holding the deep tail bounds the makespan.
+    Striding gives every pod a shallow-to-deep mix; for monotone cost
+    growth the loads even out within a few percent.
+
+    Region writes stay disjoint (one frame = one chunk), so the storage
+    architecture is unaffected. Only the icechunk commit message gets
+    less neat. `frame_range_for_pod` remains for workloads with flat
+    per-frame cost (e.g. fixed-depth tile sweeps).
+    """
+    return list(range(pod_index, n_frames, n_pods))
+
+
 # Hint to suppress unused-import warnings when downstream re-exports fields().
 _ = fields

@@ -47,7 +47,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
-from common.config import RunConfig, describe, frame_range_for_pod, from_env
+from common.config import RunConfig, describe, frame_indices_for_pod, from_env
 from common.gcp import require_gcp_credentials
 from common.schedule import canonical_schedule
 from common.store import ITERATIONS_DTYPE
@@ -149,13 +149,15 @@ def run_task(task_index: int, task_count: int) -> None:
     cfg: RunConfig = from_env()
     output = os.environ.get("MANDELFLOW_OUTPUT", DEFAULT_OUTPUT)
 
-    # Frame range — same arithmetic as the Dagster asset, so a Pod and
-    # a multiprocess worker compute identical slices.
-    start, end = frame_range_for_pod(task_index, task_count, cfg.n_frames)
+    # Stride sharding — same arithmetic as the Dagster asset, so a Pod and
+    # a multiprocess worker compute identical slices. Strided (not
+    # contiguous) because deep frames cost up to ~66× shallow ones; see
+    # frame_indices_for_pod and NEXT_STEPS.md §2 (17× pod imbalance).
+    frames = frame_indices_for_pod(task_index, task_count, cfg.n_frames)
 
     print(
-        f"task {task_index}/{task_count}: frames [{start}..{end}) "
-        f"({end - start} frames, kernel={_KERNEL})",
+        f"task {task_index}/{task_count}: {len(frames)} frames "
+        f"(stride {task_count} from {frames[0] if frames else '-'}, kernel={_KERNEL})",
         flush=True,
     )
     print(f"  {describe(cfg)}", flush=True)
@@ -173,7 +175,7 @@ def run_task(task_index: int, task_count: int) -> None:
 
     t_start = time.perf_counter()
     session = repo.writable_session("main")
-    for k in range(start, end):
+    for k in frames:
         t_frame = time.perf_counter()
         iters = compute_frame(
             float(cr[k]), float(ci[k]), float(w[k]),
@@ -204,7 +206,10 @@ def run_task(task_index: int, task_count: int) -> None:
     # distinct frame range = distinct chunks) are mergeable, so rebase
     # + retry resolves cleanly. Retry up to 10 times — for n_pods up to
     # ~20 this is comfortable headroom.
-    commit_msg = f"task {task_index}/{task_count}: frames {start:04d}..{end - 1:04d}"
+    commit_msg = (
+        f"task {task_index}/{task_count}: {len(frames)} frames, "
+        f"stride {task_count} from {frames[0] if frames else '-'}"
+    )
     for attempt in range(10):
         try:
             snapshot = session.commit(commit_msg)
@@ -220,8 +225,8 @@ def run_task(task_index: int, task_count: int) -> None:
     commit_short = snapshot[:8] if isinstance(snapshot, str) else str(snapshot)[:8]
     elapsed = time.perf_counter() - t_start
     print(
-        f"task {task_index}/{task_count}: done — {end - start} frames in "
-        f"{elapsed:.1f}s ({elapsed * 1000 / max(end - start, 1):.0f} ms/frame) "
+        f"task {task_index}/{task_count}: done — {len(frames)} frames in "
+        f"{elapsed:.1f}s ({elapsed * 1000 / max(len(frames), 1):.0f} ms/frame) "
         f"commit {commit_short}",
         flush=True,
     )
