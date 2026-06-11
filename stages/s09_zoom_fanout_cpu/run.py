@@ -326,7 +326,7 @@ def _dispatch_gke(args: argparse.Namespace, cfg: RunConfig,
               file=sys.stderr)
         return apply.returncode
 
-    print(f"  → kubectl wait --for=condition=complete (timeout 30m)",
+    print("  → kubectl wait --for=condition=complete (timeout 30m)",
           flush=True)
     t0 = time.perf_counter()
     wait = subprocess.run(
@@ -338,7 +338,7 @@ def _dispatch_gke(args: argparse.Namespace, cfg: RunConfig,
     print(f"  kubectl wait exit code: {wait.returncode}, "
           f"elapsed {elapsed:.1f}s", flush=True)
 
-    print(f"  → kubectl logs (combined, last 200 lines per Pod)", flush=True)
+    print("  → kubectl logs (combined, last 200 lines per Pod)", flush=True)
     subprocess.run(
         ["kubectl", "logs", f"job/{job_name}", "-n", args.namespace,
          "--all-containers=true", "--tail=200", "--prefix=true"],
