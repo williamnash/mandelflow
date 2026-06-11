@@ -32,11 +32,12 @@ common/                  # Schedule (canonical zoom path), Zarr schema helpers, 
 stages/sNN_<name>/       # One package per stage. Same contract, different implementation.
   s08_zoom_cloud_cpu/    # Single cloud VM, CPU kernel via s04 (Dask) — working
     terraform/           # VM + GCS bucket + attached SA + IAP firewall + budget
-  s09_zoom_fanout_cpu/   # Multi-machine CPU fan-out (placeholder)
+  s09_zoom_fanout_cpu/   # Multi-machine CPU fan-out (Cloud Run Jobs / GKE)
+    terraform/           # GKE Standard + Workload Identity Federation (shared with s11)
+    k8s/                 # Pod / Job manifests
   s10_zoom_cloud_gpu/    # Single cloud VM, GPU kernel (placeholder; GCP quota blocked)
   s11_zoom_fanout_gpu/   # GKE multi-Pod GPU fan-out, frame range per Pod
-    terraform/           # GKE Standard + GPU pool + Workload Identity Federation
-    k8s/                 # Pod / Job manifests
+    k8s/                 # Pod / Job manifests (GPU pool)
     dev/                 # kind cluster config for local plumbing tests
   s12_viewer_fastapi/    # FastAPI tile server (read-only over precomputed Zarrs)
 orchestration/           # Dagster: assets, partitions, IOManagers, resources
@@ -54,6 +55,7 @@ pyproject.toml           # uv-managed deps
 
 ## Conventions
 
+- **Red/green TDD for behaviour changes.** Before implementing a new feature or fixing a bug, write the test in `tests/` first, run it, and confirm it fails for the expected reason (red). Then implement until it passes (green), and run the full suite before committing. GPU/GL-dependent tests must carry `skipif` guards so they skip — not fail — on machines without the hardware. Docs-only and infra-only changes (terraform, k8s manifests, workflows) are exempt.
 - **Stage directory naming: `sNN_lowercase_name`.** The `s` prefix preserves visual ordering and keeps the module a valid Python identifier (you can't `import 00_naive`).
 - **Imports from the repo root.** `from common.schedule import canonical_schedule`, `from stages.s00_naive.compute import compute_frame`.
 - **No top-level secrets.** GCP service accounts live in Workload Identity bindings; CI uses OIDC, not JSON keys.
