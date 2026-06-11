@@ -16,7 +16,7 @@ resource "google_compute_instance" "mandelflow_vm" {
   machine_type = var.machine_type
 
   scheduling {
-    on_host_maintenance = "MIGRATE"   # CPU VMs can live-migrate
+    on_host_maintenance = "MIGRATE" # CPU VMs can live-migrate
     automatic_restart   = true
   }
 

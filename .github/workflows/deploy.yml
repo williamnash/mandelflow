@@ -4,13 +4,16 @@ on:
   push:
     branches: [main]
     paths:
-      - "stages/s09_viewer_fastapi/**"
+      - "stages/s12_viewer_fastapi/**"
       - "common/**"
       - "render/**"
+      - "Dockerfile"
       - ".github/workflows/deploy.yml"
 
-# Stub — fill in once Workload Identity Federation is set up and the
-# viewer Dockerfile lands in stages/s09_viewer_fastapi/.
+# Stub — remove the gate once Workload Identity Federation secrets are
+# configured (GCP_WORKLOAD_IDENTITY_PROVIDER, GCP_DEPLOY_SA, GCP_REGION,
+# GCP_PROJECT). The viewer ships in the repo-root Dockerfile (one-image
+# model) with a uvicorn entrypoint.
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -28,11 +31,14 @@ jobs:
       - name: Build and push
         run: |
           gcloud auth configure-docker ${{ secrets.GCP_REGION }}-docker.pkg.dev
-          docker build -t ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/mandelflow/viewer:${{ github.sha }} stages/s09_viewer_fastapi
+          docker build -t ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/mandelflow/viewer:${{ github.sha }} .
           docker push ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/mandelflow/viewer:${{ github.sha }}
       - name: Deploy to Cloud Run
         run: |
           gcloud run deploy mandelflow-viewer \
             --image ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/mandelflow/viewer:${{ github.sha }} \
             --region ${{ secrets.GCP_REGION }} \
+            --command python \
+            --args "-m,uvicorn,stages.s12_viewer_fastapi.main:app,--host,0.0.0.0,--port,8080" \
+            --port 8080 \
             --allow-unauthenticated

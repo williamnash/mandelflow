@@ -41,12 +41,12 @@ provider "google" {
 # self-documenting and re-applies harmlessly.
 resource "google_project_service" "required_apis" {
   for_each = toset([
-    "container.googleapis.com",          # GKE
-    "iamcredentials.googleapis.com",     # WIF token exchange
-    "artifactregistry.googleapis.com",   # pulled images
-    "iam.googleapis.com",                # service accounts
-    "storage.googleapis.com",            # bucket access
-    "compute.googleapis.com",            # node pool VMs
+    "container.googleapis.com",        # GKE
+    "iamcredentials.googleapis.com",   # WIF token exchange
+    "artifactregistry.googleapis.com", # pulled images
+    "iam.googleapis.com",              # service accounts
+    "storage.googleapis.com",          # bucket access
+    "compute.googleapis.com",          # node pool VMs
   ])
   service            = each.value
   disable_on_destroy = false

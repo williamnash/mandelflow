@@ -16,6 +16,7 @@ dist/
 .ipynb_checkpoints/
 
 # Output artefacts
+out/
 *.png
 *.mp4
 *.gif
