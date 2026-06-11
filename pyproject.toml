@@ -36,7 +36,7 @@ dependencies = [
 
 [project.optional-dependencies]
 gpu = [
-    "torch>=2.4",                   # stage 05
+    "torch>=2.7",                   # stage 05; >=2.7 for torch.compile (inductor) on MPS
     "moderngl>=5.11",               # stage 06
     "pygame>=2.6",                  # offscreen GL context provider on macOS
 ]

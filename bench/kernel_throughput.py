@@ -36,7 +36,7 @@ CENTER = (-0.75, 0.0)
 WIDTH = 3.5
 MAX_ITER = 256
 
-# (label, module, resolution, kernel note, prebuilt-kwargs factory)
+# (label, module:function, resolution, kernel note, prebuilt-kwargs factory)
 STAGES = [
     ("s00\nnaive",      "stages.s00_naive.compute",      200,  "interpreter",   None),
     ("s01\nnumpy",      "stages.s01_numpy.compute",      1000, "vectorised",    None),
@@ -44,6 +44,8 @@ STAGES = [
     ("s03\nnumba opt",  "stages.s03_numba_opt.compute",  1000, "+ early exit",  None),
     ("s04\ndask local", "stages.s04_dask_local.compute", 1000, "+ all cores",   None),
     ("s05\ntorch MPS",  "stages.s05_gpu_torch.compute",  2000, "GPU, py-driven", "_torch_kwargs"),
+    ("s05\ncompiled",   "stages.s05_gpu_torch.compute:compute_frame_compiled",
+                                                         2000, "GPU, fused",    "_torch_kwargs"),
     ("s06\nshader",     "stages.s06_gpu_shader.compute",  2000, "GPU, on-device", "_shader_kwargs"),
 ]
 
@@ -71,7 +73,8 @@ def _best_time(call, n: int) -> float:
 def measure() -> list[dict]:
     records = []
     for label, module, res, note, kw_factory in STAGES:
-        compute_frame = importlib.import_module(module).compute_frame
+        module, _, func = module.partition(":")
+        compute_frame = getattr(importlib.import_module(module), func or "compute_frame")
         kwargs = globals()[kw_factory]() if kw_factory else {}
 
         def call():
@@ -117,7 +120,9 @@ def chart(records: list[dict], machine: str) -> Path:
                 ha="center", va="bottom", fontsize=8, color="#555", rotation=0)
 
     speedup = values[-1] / values[0]
-    ax.set_title(f"One Mandelbrot kernel, seven implementations — {speedup:,.0f}× faster, s00 → s06",
+    n_impls = {"seven": 7, "eight": 8, "nine": 9}
+    word = next((w for w, n in n_impls.items() if n == len(records)), str(len(records)))
+    ax.set_title(f"One Mandelbrot kernel, {word} implementations — {speedup:,.0f}× faster, s00 → s06",
                  fontsize=13, fontweight="bold")
     legend = [plt.Rectangle((0, 0), 1, 1, color="#13aa9b"),
               plt.Rectangle((0, 0), 1, 1, color="#e8a33d")]

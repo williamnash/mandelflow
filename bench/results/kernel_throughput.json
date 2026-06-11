@@ -12,56 +12,64 @@
       "plot_label": "s00\nnaive",
       "note": "interpreter",
       "resolution": 200,
-      "seconds": 0.08951745799276978,
-      "mpx_per_s": 0.4468402130367772
+      "seconds": 0.08989362500142306,
+      "mpx_per_s": 0.4449703746997274
     },
     {
       "label": "s01 numpy",
       "plot_label": "s01\nnumpy",
       "note": "vectorised",
       "resolution": 1000,
-      "seconds": 1.3243387090042233,
-      "mpx_per_s": 0.755093839061689
+      "seconds": 1.2400319590233266,
+      "mpx_per_s": 0.8064308284341474
     },
     {
       "label": "s02 numba",
       "plot_label": "s02\nnumba",
       "note": "JIT",
       "resolution": 1000,
-      "seconds": 0.12326979200588539,
-      "mpx_per_s": 8.112287558271015
+      "seconds": 0.12369495793245733,
+      "mpx_per_s": 8.084403897417081
     },
     {
       "label": "s03 numba opt",
       "plot_label": "s03\nnumba opt",
       "note": "+ early exit",
       "resolution": 1000,
-      "seconds": 0.019330583047121763,
-      "mpx_per_s": 51.731497056365065
+      "seconds": 0.019712666980922222,
+      "mpx_per_s": 50.72880300609719
     },
     {
       "label": "s04 dask local",
       "plot_label": "s04\ndask local",
       "note": "+ all cores",
       "resolution": 1000,
-      "seconds": 0.007764582987874746,
-      "mpx_per_s": 128.78991718700289
+      "seconds": 0.007644833065569401,
+      "mpx_per_s": 130.80730362887502
     },
     {
       "label": "s05 torch MPS",
       "plot_label": "s05\ntorch MPS",
       "note": "GPU, py-driven",
       "resolution": 2000,
-      "seconds": 0.42505462502595037,
-      "mpx_per_s": 9.410555172187086
+      "seconds": 0.5297258750069886,
+      "mpx_per_s": 7.55107535562092
+    },
+    {
+      "label": "s05 compiled",
+      "plot_label": "s05\ncompiled",
+      "note": "GPU, fused",
+      "resolution": 2000,
+      "seconds": 0.2752574170008302,
+      "mpx_per_s": 14.531851833761618
     },
     {
       "label": "s06 shader",
       "plot_label": "s06\nshader",
       "note": "GPU, on-device",
       "resolution": 2000,
-      "seconds": 0.008866249991115183,
-      "mpx_per_s": 451.1490206128156
+      "seconds": 0.010023624985478818,
+      "mpx_per_s": 399.05722787861504
     }
   ]
 }

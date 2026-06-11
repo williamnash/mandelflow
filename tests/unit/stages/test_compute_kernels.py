@@ -23,8 +23,10 @@ from stages.s04_dask_local.compute import compute_frame as s04_compute
 
 try:
     from stages.s05_gpu_torch.compute import compute_frame as s05_compute
+    from stages.s05_gpu_torch.compute import compute_frame_compiled as s05_compiled
 except ImportError:
     s05_compute = None
+    s05_compiled = None
 
 try:
     from stages.s06_gpu_shader.compute import compute_frame as s06_compute
@@ -39,6 +41,13 @@ STAGES = [
     pytest.param(s04_compute, id="s04_dask_local"),
     pytest.param(
         s05_compute, id="s05_gpu_torch",
+        marks=pytest.mark.skipif(
+            not has_gpu(),
+            reason="requires torch + GPU (CUDA or MPS); `uv sync --extra gpu`",
+        ),
+    ),
+    pytest.param(
+        s05_compiled, id="s05_gpu_torch_compiled",
         marks=pytest.mark.skipif(
             not has_gpu(),
             reason="requires torch + GPU (CUDA or MPS); `uv sync --extra gpu`",
@@ -81,3 +90,19 @@ def test_view_contains_both_in_set_and_escaped_pixels(compute_frame):
     arr = compute_frame(-0.75, 0.0, 3.5, 16, 50)
     assert (arr == 50).any()
     assert (arr < 50).any()
+
+
+@pytest.mark.skipif(
+    not has_gpu(),
+    reason="requires torch + GPU (CUDA or MPS); `uv sync --extra gpu`",
+)
+def test_s05_compiled_matches_eager():
+    """Same math, fused dispatch — results may differ only where kernel
+    fusion changes float32 rounding right at the escape boundary."""
+    import numpy as np
+
+    eager = s05_compute(-0.75, 0.0, 3.5, 64, 256)
+    compiled = s05_compiled(-0.75, 0.0, 3.5, 64, 256)
+    delta = np.abs(eager.astype(np.int32) - compiled.astype(np.int32))
+    assert (delta <= 1).mean() > 0.99
+    assert np.median(delta) == 0

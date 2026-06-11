@@ -44,6 +44,20 @@ Three structural reasons:
 
 On a **discrete CUDA GPU**, all three of these pressures are different: massively more cores hide the dispatch overhead, and the brute-force tensor ops are exactly what CUDA cores are tuned for. The same code is expected to be ~10–20× faster on a T4 or A10 than on integrated MPS.
 
+## The fix, demonstrated: `compute_frame_compiled`
+
+Reason 2 is the one `torch.compile` erases, and the module ships both variants so the difference is measurable rather than asserted. `compute_frame_compiled` runs the *same* `_step` function through inductor, which fuses each iteration's ~10 tensor ops into one device kernel — one launch per iteration instead of ~10. Measured on Apple MPS (torch 2.12, best of 3 after warm-up):
+
+| Frame | eager | compiled | speedup |
+|---|---|---|---|
+| 256² × 512 iter | 183 ms | 27 ms | **6.7×** |
+| 1024² × 512 iter | 339 ms | 137 ms | 2.5× |
+| 2048² × 256 iter | 583 ms | 266 ms | 2.2× |
+
+The shape of that table *is* the lesson: small frames are dispatch-bound, so fusion pays most there; large frames become memory-bandwidth-bound and the remaining ~2× comes from fewer passes over the tensors. Reasons 1 and 3 (lockstep iteration, `where` not skipping FLOPs) are untouched — that ceiling only falls in s06's shader, where each pixel runs its own loop with a real `break`.
+
+Two implementation details worth reading in `compute.py`: the compile is `dynamic=True` so one compile serves every resolution, and the iteration counter is a device tensor — passing a fresh Python int each pass would make dynamo specialise (recompile) per `k` value. First call pays a one-off compile cost (a few seconds); `torch >= 2.7` is required for inductor on MPS.
+
 ## Why s05 still matters
 
 The pedagogical point isn't speed at 2048×2048 on one laptop — it's the **programming model**. Three properties of GPU tensor compute that no CPU stage has:
