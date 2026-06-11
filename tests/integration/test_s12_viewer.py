@@ -69,10 +69,14 @@ def test_palettes_endpoint(client):
     assert body["default"] in body["palettes"]
 
 
-def test_runs_lists_stores(client):
+def test_runs_lists_stores_with_metadata(client):
+    # The UI needs enough metadata to label the dropdown and pick the
+    # richest store as the default — not the alphabetically first one.
     resp = client.get("/runs")
     assert resp.status_code == 200
-    assert resp.json()["runs"] == ["demo.zarr"]
+    assert resp.json()["runs"] == [
+        {"id": "demo.zarr", "n_frames": N_FRAMES, "resolution": RESOLUTION}
+    ]
 
 
 def test_run_metadata(client):

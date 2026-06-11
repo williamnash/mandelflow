@@ -67,7 +67,15 @@ async function init() {
 
   const runs = (await (await fetch("/runs")).json()).runs;
   if (!runs.length) { $("empty").style.display = "grid"; return; }
-  $("run").replaceChildren(...runs.map(r => new Option(r, r)));
+  // Richest store first: most pixels to actually pan and zoom over.
+  runs.sort((a, b) => (b.resolution ?? 0) - (a.resolution ?? 0)
+                   || (b.n_frames ?? 0) - (a.n_frames ?? 0));
+  $("run").replaceChildren(...runs.map(r => {
+    const label = r.resolution
+      ? `${r.id} — ${r.n_frames} fr · ${r.resolution}²`
+      : `${r.id} (unreadable)`;
+    return new Option(label, r.id);
+  }));
 
   $("run").onchange = loadRun;
   $("frame-range").oninput = refresh;
@@ -92,15 +100,16 @@ function maxNativeZoom() {
 
 function buildMap() {
   if (map) map.remove();
-  map = L.map("map", { crs: L.CRS.Simple, attributionControl: false, zoomSnap: 0.5 });
+  map = L.map("map", { crs: L.CRS.Simple, attributionControl: false, zoomSnap: 0.25 });
   const maxZ = maxNativeZoom();
+  const bounds = L.latLngBounds(map.unproject([0, 256], 0), map.unproject([256, 0], 0));
   layer = L.tileLayer(tileUrl(), {
     tileSize: 256, noWrap: true, minZoom: 0,
-    maxNativeZoom: maxZ, maxZoom: maxZ + 3,   // overzoom past native = nearest-neighbour
+    bounds,                                   // never request tiles outside the image
+    maxNativeZoom: maxZ, maxZoom: maxZ + 2,   // overzoom past native = nearest-neighbour
   });
   layer.addTo(map);
-  const bounds = L.latLngBounds(map.unproject([0, 256], 0), map.unproject([256, 0], 0));
-  map.setMaxBounds(bounds.pad(0.3));
+  map.setMaxBounds(bounds.pad(0.15));
   map.fitBounds(bounds);
 }
 

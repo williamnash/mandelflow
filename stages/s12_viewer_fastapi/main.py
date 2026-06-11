@@ -162,7 +162,22 @@ def healthz() -> dict:
 
 @app.get("/runs")
 def runs() -> dict:
-    return {"runs": _list_runs(_store_root())}
+    """Run IDs with the metadata the UI needs to label the picker and
+    choose a default. Opens each store once; subsequent calls hit the
+    dataset cache. A store that fails to open is listed with null
+    metadata rather than poisoning the whole listing."""
+    root = _store_root()
+    out = []
+    for run_id in _list_runs(root):
+        entry: dict = {"id": run_id, "n_frames": None, "resolution": None}
+        try:
+            ds = _open_run(root, run_id, _cache_token(root, run_id))
+            entry["n_frames"] = int(ds.sizes["frame"])
+            entry["resolution"] = int(ds.sizes["y"])
+        except Exception:
+            pass
+        out.append(entry)
+    return {"runs": out}
 
 
 @app.get("/runs/{run_id}")

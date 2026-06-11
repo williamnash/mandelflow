@@ -8,7 +8,15 @@ Pure CPU: I/O + colormap + PNG encoding. No GPU, no GL context, no compute kerne
 
 ```bash
 # Produce something to look at, if out/ is empty:
-uv run python -m stages.s07_zoom_local.run        # or any compute stage
+uv run python -m stages.s07_zoom_local.run        # multi-frame zoom (for the play button)
+
+# The map shines with depth — an 8K frame gives 5 native zoom levels
+# and takes ~0.2s through the s06 shader:
+uv run python -m stages.s06_gpu_shader.run \
+  --resolution 8192 --max-iter 2048 --output out/full_set_8k.zarr
+uv run python -m stages.s06_gpu_shader.run \
+  --center-re -0.743643887037151 --center-im 0.131825904205330 \
+  --width 0.002 --resolution 8192 --max-iter 4096 --output out/seahorse_8k.zarr
 
 # Serve it:
 uv run uvicorn stages.s12_viewer_fastapi.main:app    # or: make viewer
