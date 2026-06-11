@@ -22,33 +22,10 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-import xarray as xr
 from PIL import Image
 
+from common.store import open_iterations_dataset as _open_dataset
 from render.palettes import DEFAULT_FREQ, DEFAULT_PALETTE, colorize
-
-
-def _open_dataset(path: str | Path) -> xr.Dataset:
-    """Open an iterations dataset from raw Zarr or an icechunk repo.
-
-    Detects icechunk by the `.icechunk` suffix on the path. Both backends
-    expose an xarray-compatible Zarr store; the only difference is how we
-    obtain it (raw-zarr opens directly; icechunk opens a readonly session
-    on the `main` branch and uses its store).
-    """
-    path_str = str(path).rstrip("/")
-    if path_str.endswith(".icechunk"):
-        import icechunk
-        if path_str.startswith("gs://"):
-            parts = path_str[5:].split("/", 1)
-            bucket = parts[0]
-            prefix = parts[1] if len(parts) > 1 else ""
-            storage = icechunk.gcs_storage(bucket=bucket, prefix=prefix)
-        else:
-            storage = icechunk.local_filesystem_storage(path_str)
-        repo = icechunk.Repository.open(storage)
-        return xr.open_zarr(repo.readonly_session("main").store)
-    return xr.open_zarr(path_str)
 
 
 def render_zarr_to_mp4(

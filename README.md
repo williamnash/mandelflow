@@ -85,8 +85,11 @@ uv sync                              # resolve & install from uv.lock
 uv sync --extra gpu                  # add stages 05, 06
 uv sync --extra cloud                # add stage-08 cloud deps
 
-# Run a single stage end-to-end (writes a Zarr, then renders frames + MP4)
+# Run a single stage (writes a Zarr — the data product)
 uv run python -m stages.s00_naive.run
+
+# Render that Zarr to a PNG (rendering is downstream of compute, by design)
+uv run python -m render.frame --input out/s00_naive.zarr
 
 # Run the whole pipeline via Dagster — asset graph UI at http://localhost:3000
 uv run dagster dev -m orchestration.definitions
@@ -117,9 +120,9 @@ mandelflow/
 │   ├── s06_gpu_shader/
 │   ├── s07_zoom_local/
 │   ├── s08_zoom_cloud_cpu/    # Single cloud VM, CPU kernel — deployable today
-│   ├── s09_zoom_fanout_cpu/   # Multi-machine CPU fan-out — placeholder
+│   ├── s09_zoom_fanout_cpu/   # Cloud Run Jobs / GKE CPU fan-out + terraform/, k8s/
 │   ├── s10_zoom_cloud_gpu/    # Single cloud VM, GPU kernel — placeholder
-│   ├── s11_zoom_fanout_gpu/   # GKE multi-Pod GPU fan-out + terraform/, k8s/, dev/
+│   ├── s11_zoom_fanout_gpu/   # GKE multi-Pod GPU fan-out + k8s/, dev/
 │   └── s12_viewer_fastapi/    # FastAPI tile server (read-only)
 ├── orchestration/           # Dagster: assets, pod partitions, IOManagers, resources
 ├── render/                  # Zarr → PNG, MP4, side-by-side comparison plots
@@ -129,19 +132,19 @@ mandelflow/
 
 ## Roadmap
 
-- [ ] **`common/`** — `schedule.py` (canonical zoom path), `store.py` (xarray + Zarr schema), `colormap.py`.
-- [ ] **Stages 00–03** — single-frame CPU implementations, all writing to the same Zarr schema.
-- [ ] **`render/`** — Zarr → PNG + MP4 via ffmpeg.
-- [ ] **`orchestration/`** — Dagster asset graph, frame partitions, `LocalZarrIOManager`. `dagster dev` shows the pipeline.
-- [ ] **Stage 04** — Dask local cluster, one big single-frame render, still raw Zarr.
-- [ ] **Stage 07** — Frame dimension fanned across Dask workers; storage backed by icechunk for transactional parallel writes. First multi-frame animation rendered from a real Zarr.
-- [ ] **Stages 05, 06** — GPU stages. Native on macOS via MPS (stage 05) and a hidden pygame GL context (stage 06); EGL standalone context for Linux containers. Stage 06 (headless EGL in a CUDA container) is the riskiest single step.
-- [ ] **Stage 08** — Single GCE VM, CPU kernel (s03); Terraform provisions the VM, GCS bucket, attached service account; s07's loop runs in the container with output to `gs://bucket/run.zarr`.
-- [ ] **Stage 09** — Multi-machine CPU fan-out, likely via Cloud Run Jobs running the s04 kernel — placeholder until s08 is exercised.
+- [x] **`common/`** — `schedule.py` (canonical zoom path), `store.py` (xarray + Zarr schema), `config.py` (presets).
+- [x] **Stages 00–03** — single-frame CPU implementations, all writing to the same Zarr schema.
+- [x] **`render/`** — Zarr → PNG + MP4 via ffmpeg.
+- [x] **`orchestration/`** — Dagster asset graph, pod partitions, Zarr/icechunk IOManagers. `dagster dev` shows the pipeline.
+- [x] **Stage 04** — Dask local cluster, one big single-frame render, still raw Zarr.
+- [x] **Stage 07** — Frame dimension fanned across Dask workers; storage backed by icechunk for transactional parallel writes. First multi-frame animation rendered from a real Zarr.
+- [x] **Stages 05, 06** — GPU stages. Native on macOS via MPS (stage 05) and a hidden pygame GL context (stage 06); EGL standalone context for Linux containers. Stage 06 (headless EGL in a CUDA container) is the riskiest single step.
+- [x] **Stage 08** — Single GCE VM, CPU kernel; Terraform provisions the VM, GCS bucket, attached service account; s07's loop runs in the container with output to `gs://bucket/run.zarr`.
+- [x] **Stage 09** — Multi-machine CPU fan-out via Cloud Run Jobs / GKE Indexed Jobs; first successful cloud fan-out validated end-to-end.
 - [ ] **Stage 10** — Single cloud VM with a GPU, s06 kernel — placeholder (GCP quota blocked on new project; may target multi-cloud).
-- [ ] **Stage 11** — Terraform GKE Standard + GPU node pool + Workload Identity Federation; frame ranges fanned across Pods via Dagster K8s executor; icechunk repo in `gs://bucket/run.icechunk` via the `IcechunkFrameIOManager` in `orchestration/definitions.py`.
-- [ ] **Stage 12** — FastAPI tile server over precomputed Zarrs (frame PNGs + slippy-map tiles). Pure CPU; deploys to Cloud Run and scales to zero.
-- [ ] **CI** — `pr.yml` runs stages 00–04 + 07 at small scales; lints Terraform; validates Dagster definitions.
+- [ ] **Stage 11** — GPU node pool on the s09 GKE cluster; frame ranges fanned across Pods via Dagster K8s executor; icechunk repo in `gs://bucket/run.icechunk` via the `IcechunkFrameIOManager` in `orchestration/definitions.py`.
+- [x] **Stage 12** — FastAPI tile server over precomputed Zarrs (frame PNGs + slippy-map tiles). Pure CPU; deploys to Cloud Run and scales to zero.
+- [x] **CI** — `pr.yml` runs the test suite (GPU/GL tests self-skip on hosted runners), validates Dagster definitions, and fmt-checks + validates both Terraform stacks.
 - [ ] **`bench/`** — aggregate run.json across stages, regenerate the talk-style scaling chart.
 
 See [`docs/WEEKEND_PLAN.md`](docs/WEEKEND_PLAN.md) for the chronological build order and [`docs/GOTCHAS.md`](docs/GOTCHAS.md) for the known sharp edges.
