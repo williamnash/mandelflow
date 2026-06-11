@@ -22,6 +22,9 @@ dist/
 *.zarr/
 *.icechunk/
 frames/
+# ...except committed docs graphics (README banner, paint-race GIF, etc.)
+!docs/assets/*.png
+!docs/assets/*.gif
 
 # Terraform
 .terraform/
