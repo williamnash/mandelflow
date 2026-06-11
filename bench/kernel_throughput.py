@@ -150,7 +150,7 @@ def main() -> None:
     records = measure()
     (RESULTS_DIR / "kernel_throughput.json").write_text(json.dumps(
         {"machine": machine, "center": CENTER, "width": WIDTH,
-         "max_iter": MAX_ITER, "stages": records}, indent=2))
+         "max_iter": MAX_ITER, "stages": records}, indent=2) + "\n")
     out = chart(records, machine)
     print(f"\nwrote {out}")
     print(f"wrote {RESULTS_DIR / 'kernel_throughput.json'}")
