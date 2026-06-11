@@ -40,11 +40,13 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 from fastapi import FastAPI, HTTPException, Response
+from fastapi.responses import HTMLResponse
 
 from common.store import STORE_SUFFIXES, open_iterations_dataset
-from render.palettes import DEFAULT_FREQ, DEFAULT_PALETTE, colorize
+from render.palettes import DEFAULT_FREQ, DEFAULT_PALETTE, available, colorize
 
 TILE_SIZE = 256
+STATIC_DIR = Path(__file__).parent / "static"
 
 app = FastAPI(title="mandelflow viewer", docs_url="/docs")
 
@@ -139,6 +141,18 @@ def _png_response(rgb: np.ndarray, resize_to: int | None = None) -> Response:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return Response(buf.getvalue(), media_type="image/png")
+
+
+@app.get("/", response_class=HTMLResponse)
+def index() -> str:
+    """The interactive UI: run picker, frame scrubber + play, palette
+    switcher, and a Leaflet pan/zoom map over the tile endpoints."""
+    return (STATIC_DIR / "index.html").read_text()
+
+
+@app.get("/palettes")
+def palettes() -> dict:
+    return {"palettes": available(), "default": DEFAULT_PALETTE}
 
 
 @app.get("/healthz")

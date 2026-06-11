@@ -97,8 +97,8 @@ uv run dagster dev -m orchestration.definitions
 # Re-render an existing Zarr with a different colormap
 uv run python -m render.animation --input out/run.zarr --cmap twilight
 
-# Stage 12: tile server over precomputed Zarrs (CPU-only)
-uv run uvicorn stages.s12_viewer_fastapi.main:app
+# Stage 12: interactive viewer over precomputed Zarrs (CPU-only)
+uv run uvicorn stages.s12_viewer_fastapi.main:app   # UI at http://127.0.0.1:8000/
 ```
 
 Developing on macOS? See [`docs/LOCAL_DEV.md`](docs/LOCAL_DEV.md) for stage-by-stage Mac notes (which stages run native, MPS limits, the `kind` cluster for stage-08 plumbing, Docker Desktop's GPU passthrough caveat).

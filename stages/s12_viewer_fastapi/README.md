@@ -11,9 +11,12 @@ Pure CPU: I/O + colormap + PNG encoding. No GPU, no GL context, no compute kerne
 uv run python -m stages.s07_zoom_local.run        # or any compute stage
 
 # Serve it:
-uv run uvicorn stages.s12_viewer_fastapi.main:app
-# → http://127.0.0.1:8000/docs for the interactive API browser
+uv run uvicorn stages.s12_viewer_fastapi.main:app    # or: make viewer
+# → http://127.0.0.1:8000/       interactive UI (pan/zoom map, frame scrubber, play)
+# → http://127.0.0.1:8000/docs   API browser
 ```
+
+The UI at `/` is one static HTML page driving the JSON API: pick a run, scrub or play through frames, switch palettes and band frequency live, and pan/zoom the tile map (Leaflet via CDN — the page needs internet for the library; the data never leaves your machine).
 
 The store root defaults to `out/`; point elsewhere with `MANDELFLOW_STORE_ROOT=/path/to/stores` or `MANDELFLOW_STORE_ROOT=gs://bucket/prefix` (raw `.zarr` and `.icechunk` runs both work — `common.store.open_iterations_dataset` handles either backend, and gs:// listing goes through gcsfs). For local roots a deleted-and-rewritten run is picked up without a restart (caches key on the store directory's mtime); gs:// runs and in-place icechunk commits serve the snapshot first opened until restart.
 
@@ -21,6 +24,8 @@ The store root defaults to `out/`; point elsewhere with `MANDELFLOW_STORE_ROOT=/
 
 | Route | Returns |
 |---|---|
+| `GET /` | the interactive UI |
+| `GET /palettes` | palette names for the UI dropdown |
 | `GET /healthz` | liveness |
 | `GET /runs` | run IDs under the store root |
 | `GET /runs/{run_id}` | n_frames, resolution, per-frame `(center, width)` coords |

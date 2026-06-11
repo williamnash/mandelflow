@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>mandelflow viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root { --bg: #0b1020; --panel: #141a2e; --text: #d9e0f0; --accent: #13aa9b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; height: 100vh; display: flex; flex-direction: column;
+         background: var(--bg); color: var(--text);
+         font: 13px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center;
+           padding: 8px 14px; background: var(--panel); border-bottom: 1px solid #232b47; }
+  header label { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  select, button { background: #1d2440; color: var(--text); border: 1px solid #2e3a63;
+                   border-radius: 4px; padding: 3px 8px; font: inherit; }
+  button { cursor: pointer; min-width: 64px; }
+  button:hover { border-color: var(--accent); }
+  input[type=range] { accent-color: var(--accent); }
+  #frame-range { width: 200px; }
+  #status { margin-left: auto; color: #8d97b8; font-variant-numeric: tabular-nums; }
+  #stage { position: relative; flex: 1; }
+  #map { position: absolute; inset: 0; background: var(--bg); }
+  #playimg { position: absolute; inset: 0; display: none; margin: auto;
+             max-width: 100%; max-height: 100%; image-rendering: pixelated; z-index: 500; }
+  #empty { position: absolute; inset: 0; display: none; place-content: center;
+           text-align: center; color: #8d97b8; z-index: 600; }
+  .leaflet-container { background: var(--bg); }
+</style>
+</head>
+<body>
+<header>
+  <label>run <select id="run"></select></label>
+  <label>frame <input id="frame-range" type="range" min="0" max="0" value="0" step="1">
+    <span id="frame-num">0</span></label>
+  <button id="play">▶ play</button>
+  <label>palette <select id="palette"></select></label>
+  <label>freq <input id="freq" type="range" min="0.02" max="0.40" step="0.01" value="0.10">
+    <span id="freq-num">0.10</span></label>
+  <span id="status"></span>
+</header>
+<div id="stage">
+  <div id="map"></div>
+  <img id="playimg" alt="">
+  <div id="empty"><div>
+    <p><strong>No runs found under the store root.</strong></p>
+    <p>Compute one, e.g. <code>uv run python -m stages.s07_zoom_local.run</code>,<br>
+       or point <code>MANDELFLOW_STORE_ROOT</code> at a directory of .zarr / .icechunk stores.</p>
+  </div></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let meta = null, map = null, layer = null, playing = false;
+
+const frame = () => +$("frame-range").value;
+const params = () => `cmap=${$("palette").value}&freq=${$("freq").value}`;
+const tileUrl = () => `/tiles/${$("run").value}/${frame()}/{z}/{x}/{y}.png?${params()}`;
+const frameUrl = f => `/runs/${$("run").value}/frame/${f}.png?${params()}`;
+
+async function init() {
+  const pal = await (await fetch("/palettes")).json();
+  $("palette").replaceChildren(...pal.palettes.map(p => new Option(p, p, false, p === pal.default)));
+
+  const runs = (await (await fetch("/runs")).json()).runs;
+  if (!runs.length) { $("empty").style.display = "grid"; return; }
+  $("run").replaceChildren(...runs.map(r => new Option(r, r)));
+
+  $("run").onchange = loadRun;
+  $("frame-range").oninput = refresh;
+  $("palette").onchange = refresh;
+  $("freq").oninput = () => { $("freq-num").textContent = (+$("freq").value).toFixed(2); refresh(); };
+  $("play").onclick = togglePlay;
+  await loadRun();
+}
+
+async function loadRun() {
+  stopPlay();
+  meta = await (await fetch(`/runs/${$("run").value}`)).json();
+  $("frame-range").max = meta.n_frames - 1;
+  $("frame-range").value = 0;
+  buildMap();
+  updateStatus();
+}
+
+function maxNativeZoom() {
+  return Math.max(0, Math.round(Math.log2(meta.resolution / 256)));
+}
+
+function buildMap() {
+  if (map) map.remove();
+  map = L.map("map", { crs: L.CRS.Simple, attributionControl: false, zoomSnap: 0.5 });
+  const maxZ = maxNativeZoom();
+  layer = L.tileLayer(tileUrl(), {
+    tileSize: 256, noWrap: true, minZoom: 0,
+    maxNativeZoom: maxZ, maxZoom: maxZ + 3,   // overzoom past native = nearest-neighbour
+  });
+  layer.addTo(map);
+  const bounds = L.latLngBounds(map.unproject([0, 256], 0), map.unproject([256, 0], 0));
+  map.setMaxBounds(bounds.pad(0.3));
+  map.fitBounds(bounds);
+}
+
+function refresh() {
+  $("frame-num").textContent = frame();
+  if (!playing && layer) layer.setUrl(tileUrl());
+  updateStatus();
+}
+
+function updateStatus() {
+  if (!meta) return;
+  const f = meta.frames[frame()];
+  const im = f.center_im < 0 ? `− ${(-f.center_im).toPrecision(6)}` : `+ ${f.center_im.toPrecision(6)}`;
+  $("status").textContent =
+    `${meta.n_frames} frames · ${meta.resolution}² · c = ${f.center_re.toPrecision(6)} ${im}i · width ${f.width.toExponential(2)}`;
+}
+
+function togglePlay() {
+  playing ? stopPlay() : startPlay();
+}
+
+function startPlay() {
+  if (!meta || meta.n_frames < 2) return;
+  playing = true;
+  $("play").textContent = "❚❚ pause";
+  $("playimg").style.display = "block";
+  step();
+}
+
+function stopPlay() {
+  playing = false;
+  $("play").textContent = "▶ play";
+  $("playimg").style.display = "none";
+  if (layer) layer.setUrl(tileUrl());
+}
+
+function step() {
+  if (!playing) return;
+  const next = (frame() + 1) % meta.n_frames;
+  $("frame-range").value = next;
+  const img = new Image();
+  // Drive the cadence off image load, so slow stores degrade to a slower
+  // animation instead of a backlog of in-flight requests.
+  img.onload = () => { $("playimg").src = img.src; refresh(); setTimeout(step, 70); };
+  img.onerror = stopPlay;
+  img.src = frameUrl(next);
+}
+
+init();
+</script>
+</body>
+</html>

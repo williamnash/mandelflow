@@ -21,7 +21,7 @@ bench:             ## Re-measure kernel throughput on this machine -> bench/resu
 dagster:           ## Asset-graph UI at http://localhost:3000
 	uv run dagster dev -m orchestration.definitions
 
-viewer:            ## Stage-12 tile server at http://localhost:8000 (docs at /docs)
+viewer:            ## Stage-12 viewer at http://localhost:8000 (UI at /, API docs at /docs)
 	uv run uvicorn stages.s12_viewer_fastapi.main:app --reload
 
 docker:            ## The one deployment image (stages 06, 08-12)

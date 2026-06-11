@@ -50,6 +50,25 @@ def test_healthz(client):
     assert resp.json()["status"] == "ok"
 
 
+def test_index_serves_interactive_ui(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    body = resp.text
+    # The UI drives itself from the JSON API; sanity-check the hooks exist.
+    assert "/runs" in body
+    assert "/tiles/" in body
+    assert "leaflet" in body.lower()
+
+
+def test_palettes_endpoint(client):
+    resp = client.get("/palettes")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "dusk" in body["palettes"]
+    assert body["default"] in body["palettes"]
+
+
 def test_runs_lists_stores(client):
     resp = client.get("/runs")
     assert resp.status_code == 200
