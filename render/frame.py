@@ -19,22 +19,28 @@ import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
 
+from render.palettes import DEFAULT_FREQ, DEFAULT_PALETTE, colorize
+
 
 def render_frame_to_png(
     iterations: np.ndarray,
     output_path: str | Path,
-    cmap: str = "twilight_shifted",
+    cmap: str = DEFAULT_PALETTE,
     dpi: int = 150,
+    freq: float = DEFAULT_FREQ,
 ) -> None:
     """Render a 2D iteration array to a PNG file.
 
-    No axes, no colorbar — just the fractal. The renderer trusts the
-    encoding contract: bounded-set pixels carry the array's maximum
-    value (the `max_iter` sentinel from `compute_frame`), so the chosen
-    colormap's top end lands on the set itself.
+    No axes, no colorbar — just the fractal. Colouring goes through
+    `render.palettes.colorize`: the set (bounded pixels, which carry the
+    array's maximum value per the `compute_frame` contract) is painted
+    black, and escaped pixels are coloured by a cyclic palette keyed to
+    √(iteration count), so colour variation concentrates on the set
+    boundary. `freq` controls how densely the palette repeats.
     """
+    rgb = colorize(iterations, cmap=cmap, freq=freq)
     fig, ax = plt.subplots(figsize=(8, 8))
-    ax.imshow(iterations, cmap=cmap, origin="lower")
+    ax.imshow(rgb, origin="lower")
     ax.set_axis_off()
     fig.savefig(output_path, bbox_inches="tight", pad_inches=0, dpi=dpi)
     plt.close(fig)
@@ -48,8 +54,10 @@ def main(argv: list[str] | None = None) -> None:
                         help="Frame index to render (default: 0).")
     parser.add_argument("--output", type=Path, default=None,
                         help="Output PNG path. Defaults to <input>.png.")
-    parser.add_argument("--cmap", default="twilight_shifted",
-                        help="matplotlib colormap name.")
+    parser.add_argument("--cmap", default=DEFAULT_PALETTE,
+                        help="Palette name (custom or matplotlib). See render.palettes.available().")
+    parser.add_argument("--freq", type=float, default=DEFAULT_FREQ,
+                        help="Cyclic palette frequency (higher = denser colour bands).")
     args = parser.parse_args(argv)
 
     if args.output is None:
@@ -61,7 +69,7 @@ def main(argv: list[str] | None = None) -> None:
     print(f"render: {args.input} [frame={args.frame}, shape={iterations.shape}]")
     print(f"  range: {int(iterations.min())} .. {int(iterations.max())}")
 
-    render_frame_to_png(iterations, args.output, cmap=args.cmap)
+    render_frame_to_png(iterations, args.output, cmap=args.cmap, freq=args.freq)
     print(f"  wrote: {args.output}")
 
 
