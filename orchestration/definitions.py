@@ -1,33 +1,34 @@
 """Dagster orchestration for mandelflow.
 
-One frame-partitioned `iterations` asset, three switchable dimensions
-selected at module load time via env vars:
+One `iterations` asset, partitioned **by Pod** (worker), where each Pod
+computes a contiguous range of frames and writes them to a shared Zarr or
+icechunk store. Workload shape is driven by `common.config.RunConfig`,
+selected via `MANDELFLOW_PRESET` (demo / portfolio / showcase) plus any
+`MANDELFLOW_*` overrides.
 
-| Env var                  | Values                                    | Effect                                  |
-|--------------------------|-------------------------------------------|-----------------------------------------|
+Three switchable dimensions selected at module load time via env vars:
+
+| Env var                  | Values                                          | Effect                                  |
+|--------------------------|-------------------------------------------------|-----------------------------------------|
 | `MANDELFLOW_KERNEL`      | `gpu_shader` (default), `numba_cpu`, `dask_cpu` | which compute_frame the asset calls     |
-| `MANDELFLOW_STORAGE`     | `zarr` (default), `icechunk`              | which IOManager writes the partitions   |
-| `MANDELFLOW_EXECUTOR`    | `multiprocess` (default), `k8s_cpu`, `k8s_gpu` | how partitions run                  |
+| `MANDELFLOW_STORAGE`     | `zarr` (default), `icechunk`                    | which IOManager writes the partitions   |
+| `MANDELFLOW_EXECUTOR`    | `multiprocess` (default), `k8s_cpu`, `k8s_gpu`  | how Pods run                            |
 
 Sensible combinations:
 
-  Laptop dev (default):    multiprocess + gpu_shader + zarr
-  Stage 09 (CPU on GKE):   k8s_cpu      + numba_cpu  + icechunk (gs://)
-  Stage 11 (GPU on GKE):   k8s_gpu      + gpu_shader + icechunk (gs://)
+  Laptop dev (default):    multiprocess + gpu_shader + zarr      + preset=demo
+  Stage 09 (CPU on GKE):   k8s_cpu      + numba_cpu  + icechunk  + preset=showcase
+  Stage 11 (GPU on GKE):   k8s_gpu      + gpu_shader + icechunk  + preset=showcase
 
-Both K8s modes share the same Dagster job code: the only differences are
-node-pool tolerations and GPU resource limits in the Pod spec. The k8s
-executor propagates the relevant env vars into each spawned Pod, so the
-Pod re-loads this module with the right kernel/storage selected. Local
-Dagster (laptop) talks to the remote cluster via `~/.kube/config`.
-
-Local UI:
-
-    uv run dagster dev -m orchestration.definitions
-    # Opens <http://localhost:3000>; asset graph shows N_FRAMES partitions.
+The k8s executor propagates `MANDELFLOW_*` env vars into each Pod so the
+Pod re-loads this module with the right kernel / storage / preset. Local
+Dagster talks to the remote cluster via `~/.kube/config`.
 
 Architectural notes (DESIGN.md §3):
-- Partitions ≡ frames. One `iterations` asset, one partition per frame.
+- Partitions ≡ Pods. One partition per worker; each worker handles a
+  contiguous frame range. Amortises ~25s Pod-startup over a meaningful
+  amount of compute. See `stages/s11_zoom_fanout_gpu/README.md` for the
+  rationale (frame-range-per-Pod vs frame-per-Pod).
 - IOManager ≡ storage. Same asset code regardless of backend.
 - Executor swap is what distinguishes local from cluster runs.
 """
@@ -49,12 +50,16 @@ from dagster import (
     multiprocess_executor,
 )
 
+from common.config import RunConfig, describe, frame_range_for_pod, from_env
 from common.schedule import canonical_schedule
 from common.store import ITERATIONS_DTYPE, create_iterations_dataset, write_frame
 
+# Resolve the run config at module load. The k8s executor forwards
+# MANDELFLOW_* env vars so each Pod sees the same config.
+CFG: RunConfig = from_env()
+
 # Kernel selector. Driven by env so the same module config works for both
-# the local laptop (default GPU shader) and the K8s case (where the Pod
-# inherits MANDELFLOW_KERNEL from the executor's env_vars config).
+# the local laptop (default GPU shader) and the K8s case.
 _KERNEL = os.environ.get("MANDELFLOW_KERNEL", "gpu_shader").lower()
 if _KERNEL == "gpu_shader":
     from stages.s07_zoom_local.compute import compute_frame
@@ -68,29 +73,34 @@ else:
         f"Try: gpu_shader, numba_cpu, dask_cpu."
     )
 
-# Configuration. Bump these to do a bigger run; partition count is fixed
-# at module load time, so changing N_FRAMES means restarting `dagster dev`.
-N_FRAMES = 120
-RESOLUTION = 720
-MAX_ITER = 1024
-ZARR_PATH = "out/dagster_run.zarr"
+ZARR_PATH = os.environ.get("MANDELFLOW_ZARR_PATH", "out/dagster_run.zarr")
 ICECHUNK_PATH = os.environ.get(
     "MANDELFLOW_ICECHUNK_PATH", "out/dagster_run.icechunk"
 )
 
 
-frame_partitions = StaticPartitionsDefinition(
-    [f"{i:04d}" for i in range(N_FRAMES)]
+pod_partitions = StaticPartitionsDefinition(
+    [f"{i:04d}" for i in range(CFG.n_pods)]
 )
 
 
-class ZarrFrameIOManager(ConfigurableIOManager):
-    """Persist each materialised partition as one frame in a shared Zarr.
+def _frame_range_for_pod(pod_idx: int, cfg: RunConfig = CFG) -> tuple[int, int]:
+    """Backwards-compat wrapper around common.config.frame_range_for_pod."""
+    return frame_range_for_pod(pod_idx, cfg.n_pods, cfg.n_frames)
 
-    Lazily initialises the Zarr store on first write — the store has
-    `n_frames` slots pre-allocated, region-write semantics, and the
-    schema from `common/store.py`. Same code works for local paths
-    (`out/foo.zarr`) and `gs://bucket/foo.zarr` (xarray + gcsfs).
+
+class ZarrFrameIOManager(ConfigurableIOManager):
+    """Persist a Pod's `dict[frame_idx → array]` output into a shared Zarr.
+
+    Initialises the Zarr store on first write — region-write semantics
+    plus per-frame chunks means concurrent Pods writing disjoint frames
+    don't contend. Same code works for local paths (`out/foo.zarr`) and
+    `gs://bucket/foo.zarr` (xarray + gcsfs).
+
+    The schema-init race between concurrent Pods on the very first run
+    is mitigated by the existence check; for safety in true distributed
+    settings, pre-init the store with `create_iterations_dataset` before
+    the run.
     """
 
     path: str
@@ -98,53 +108,55 @@ class ZarrFrameIOManager(ConfigurableIOManager):
     resolution: int
 
     def _ensure_dataset(self) -> None:
-        # Local paths: check for the directory; gs:// paths: try-and-write
-        # is the only portable check. For now, simple local check.
         is_gcs = self.path.startswith("gs://")
         if not is_gcs and Path(self.path).exists():
             return
         create_iterations_dataset(self.path, self.n_frames, self.resolution)
 
-    def handle_output(self, context: OutputContext, obj: np.ndarray) -> None:
+    def handle_output(self, context: OutputContext, obj: dict[int, np.ndarray]) -> None:
         self._ensure_dataset()
-        k = int(context.partition_key)
-        cr, ci, w = canonical_schedule(self.n_frames)
-        write_frame(
-            self.path,
-            frame_index=k,
-            iterations=obj,
-            center_re=float(cr[k]),
-            center_im=float(ci[k]),
-            width=float(w[k]),
+        cr, ci, w = canonical_schedule(
+            self.n_frames, CFG.initial_width, CFG.final_width
         )
-        context.log.info(f"wrote frame {k} ({obj.shape}, iter range "
-                         f"[{int(obj.min())}..{int(obj.max())}])")
+        for k in sorted(obj):
+            write_frame(
+                self.path,
+                frame_index=k,
+                iterations=obj[k],
+                center_re=float(cr[k]),
+                center_im=float(ci[k]),
+                width=float(w[k]),
+            )
+        context.log.info(
+            f"zarr: wrote {len(obj)} frames [{min(obj)}..{max(obj)}] "
+            f"to {self.path}"
+        )
 
-    def load_input(self, context: InputContext) -> np.ndarray:
-        ds = xr.open_zarr(self.path)
-        return ds.iterations.isel(frame=int(context.partition_key)).values
+    def load_input(self, context: InputContext) -> dict[int, np.ndarray]:
+        raise NotImplementedError(
+            "ZarrFrameIOManager.load_input not needed — read the store "
+            "directly with xarray.open_zarr() for downstream consumption."
+        )
 
 
 class IcechunkFrameIOManager(ConfigurableIOManager):
-    """Persist each materialised partition as one icechunk commit.
+    """Persist a Pod's frames as one icechunk commit.
 
-    Each partition opens a writable session, writes its frame chunk via
-    region-write, and commits with a descriptive message. The data-lineage
-    history is then the icechunk commit history — and that maps 1:1 onto
-    Dagster's materialisation event log. This is the architectural payoff
-    that DESIGN.md §7 has been promising.
+    Each materialised partition (= one Pod) opens a writable session,
+    writes its frame range via region-writes, and commits once. The
+    commit message names the frame range, so the icechunk commit log
+    becomes Pod-level data lineage that maps 1:1 onto Dagster's
+    partition-materialisation events.
 
-    Works for local filesystem paths (e.g. `out/run.icechunk`) and for
-    `gs://bucket/prefix` URLs. For S3 / Azure / R2 / Tigris, swap the
-    storage backend in `_open_repo`.
+    Works for local filesystem paths and `gs://bucket/prefix` URLs. For
+    S3 / Azure / R2 / Tigris, swap the storage backend in `_open_repo`.
 
-    For s09 (multi-machine Cloud Run Jobs writing concurrently), this is
-    the right IOManager: icechunk's transactional commits handle the
-    parallel-write semantics that raw Zarr can't. The dispatcher opens
-    `Repository.open_or_create` once *before* fanning out tasks (per
-    icechunk's parallel-write guide — open_or_create is NOT safe to
-    race across processes); each task then opens a session on the
-    existing repo.
+    Concurrent writers: icechunk's transactional commits handle the
+    parallel-write semantics. Different Pods writing disjoint frame
+    ranges = disjoint chunks; sessions merge automatically. The one
+    concern is `Repository.open_or_create` racing on the very first
+    write — for cloud runs, pre-initialise the repo manually (or with
+    a tiny upstream asset) before kicking off the fan-out.
     """
 
     path: str
@@ -164,22 +176,18 @@ class IcechunkFrameIOManager(ConfigurableIOManager):
         return icechunk.Repository.open_or_create(storage)
 
     def _ensure_schema(self, repo) -> None:
-        """Initialise the dataset schema if the repo is empty.
-
-        Idempotent: if `iterations` already exists at the head of `main`,
-        does nothing. Otherwise writes the pre-allocated `(N, H, W)`
-        array (zeros + NaN coords) and commits the schema.
-        """
+        """Initialise the dataset schema if the repo is empty. Idempotent."""
         try:
             session = repo.readonly_session("main")
             ds = xr.open_zarr(session.store)
             if "iterations" in ds.data_vars:
                 return
         except Exception:
-            pass  # repo empty or main has no commits — fall through to init
+            pass
 
         iterations = np.zeros(
-            (self.n_frames, self.resolution, self.resolution), dtype=ITERATIONS_DTYPE
+            (self.n_frames, self.resolution, self.resolution),
+            dtype=ITERATIONS_DTYPE,
         )
         ds = xr.Dataset(
             data_vars={"iterations": (("frame", "y", "x"), iterations)},
@@ -197,40 +205,46 @@ class IcechunkFrameIOManager(ConfigurableIOManager):
         ds.to_zarr(session.store, mode="w", encoding=encoding, zarr_format=3)
         session.commit("initialize iterations dataset schema")
 
-    def handle_output(self, context: OutputContext, obj: np.ndarray) -> None:
+    def handle_output(self, context: OutputContext, obj: dict[int, np.ndarray]) -> None:
         repo = self._open_repo()
         self._ensure_schema(repo)
-        k = int(context.partition_key)
-        cr, ci, w = canonical_schedule(self.n_frames)
 
-        ds_frame = xr.Dataset(
-            data_vars={
-                "iterations": (
-                    ("frame", "y", "x"),
-                    obj.astype(ITERATIONS_DTYPE)[None, :, :],
-                )
-            },
-            coords={
-                "frame": np.array([k], dtype=np.int32),
-                "center_re": ("frame", np.array([float(cr[k])])),
-                "center_im": ("frame", np.array([float(ci[k])])),
-                "width": ("frame", np.array([float(w[k])])),
-            },
+        cr, ci, w = canonical_schedule(
+            self.n_frames, CFG.initial_width, CFG.final_width
         )
+        frames = sorted(obj)
         session = repo.writable_session("main")
-        ds_frame.to_zarr(session.store, region={"frame": slice(k, k + 1)})
-        snapshot = session.commit(f"frame {k:04d}")
+        for k in frames:
+            ds_frame = xr.Dataset(
+                data_vars={
+                    "iterations": (
+                        ("frame", "y", "x"),
+                        obj[k].astype(ITERATIONS_DTYPE)[None, :, :],
+                    )
+                },
+                coords={
+                    "frame": np.array([k], dtype=np.int32),
+                    "center_re": ("frame", np.array([float(cr[k])])),
+                    "center_im": ("frame", np.array([float(ci[k])])),
+                    "width": ("frame", np.array([float(w[k])])),
+                },
+            )
+            ds_frame.to_zarr(session.store, region={"frame": slice(k, k + 1)})
+
+        snapshot = session.commit(
+            f"pod {context.partition_key}: frames {frames[0]:04d}..{frames[-1]:04d}"
+        )
         context.log.info(
-            f"icechunk: wrote frame {k} ({obj.shape}, iter range "
-            f"[{int(obj.min())}..{int(obj.max())}]); commit {snapshot[:8] if isinstance(snapshot, str) else snapshot}"
+            f"icechunk: pod {context.partition_key} wrote {len(frames)} "
+            f"frames [{frames[0]}..{frames[-1]}]; commit "
+            f"{snapshot[:8] if isinstance(snapshot, str) else snapshot}"
         )
 
-    def load_input(self, context: InputContext) -> np.ndarray:
-        repo = self._open_repo()
-        session = repo.readonly_session("main")
-        return xr.open_zarr(session.store).iterations.isel(
-            frame=int(context.partition_key)
-        ).values
+    def load_input(self, context: InputContext) -> dict[int, np.ndarray]:
+        raise NotImplementedError(
+            "IcechunkFrameIOManager.load_input not needed — read the repo "
+            "directly with xarray.open_zarr(repo.readonly_session('main').store)."
+        )
 
 
 def _k8s_executor(*, gpu: bool):
@@ -243,15 +257,8 @@ def _k8s_executor(*, gpu: bool):
     Pods schedule onto the tainted GPU node pool, plus a GPU resource
     limit so the device plugin makes one T4 available to the container.
 
-    Both modes propagate MANDELFLOW_KERNEL / _STORAGE / _ICECHUNK_PATH
-    into the Pod env so the spawned partition re-loads this module with
-    the same selection state. This is what makes "same code laptop and
-    cluster" actually true.
-
-    Dagster talks to the cluster via the laptop's `~/.kube/config` (set
-    up by `gcloud container clusters get-credentials …`). For in-cluster
-    Dagster (e.g., a self-hosted Dagster deployment on GKE), set
-    `load_incluster_config: True` instead.
+    Forwards MANDELFLOW_* env so each Pod re-loads this module with the
+    same kernel / storage / preset selection.
     """
     from dagster_k8s import k8s_job_executor
 
@@ -261,23 +268,27 @@ def _k8s_executor(*, gpu: bool):
     )
     sa = os.environ.get("MANDELFLOW_K8S_SA", "compute-sa")
 
-    # Env vars to forward from Dagster (laptop) into every spawned Pod.
-    # Only forward the ones the Pod's orchestration.definitions will read.
     forwarded = {}
     for key in (
         "MANDELFLOW_KERNEL", "MANDELFLOW_STORAGE",
-        "MANDELFLOW_ICECHUNK_PATH", "MANDELFLOW_IMAGE",
+        "MANDELFLOW_ICECHUNK_PATH", "MANDELFLOW_ZARR_PATH",
+        "MANDELFLOW_IMAGE", "MANDELFLOW_PRESET",
+        "MANDELFLOW_N_FRAMES", "MANDELFLOW_RESOLUTION",
+        "MANDELFLOW_INITIAL_WIDTH", "MANDELFLOW_FINAL_WIDTH",
+        "MANDELFLOW_FPS", "MANDELFLOW_N_PODS", "MANDELFLOW_MAX_ITER",
     ):
         if key in os.environ:
             forwarded[key] = os.environ[key]
     env_vars = [f"{k}={v}" for k, v in forwarded.items()]
 
+    # Pod-partitioning means each Pod does substantial work; cap concurrency
+    # at n_pods so we don't oversubscribe the node pool.
     config = {
         "job_image": image,
         "image_pull_policy": "Always",
         "service_account_name": sa,
         "env_vars": env_vars,
-        "max_concurrent": 16,
+        "max_concurrent": CFG.n_pods,
     }
 
     if gpu:
@@ -311,15 +322,6 @@ def _k8s_executor(*, gpu: bool):
 
 
 def _select_executor():
-    """Pick the executor based on MANDELFLOW_EXECUTOR env var.
-
-    `multiprocess` (default): local OS-process parallelism. Fine for the
-    laptop demo and CI.
-    `k8s_cpu`: dagster-k8s `k8s_job_executor` — one K8s Job per partition,
-    no GPU toleration. The s09 architecture.
-    `k8s_gpu`: same but with GPU toleration + GPU resource limit. The s11
-    architecture.
-    """
     mode = os.environ.get("MANDELFLOW_EXECUTOR", "multiprocess").lower()
     if mode == "multiprocess":
         return multiprocess_executor
@@ -334,53 +336,44 @@ def _select_executor():
 
 
 def _select_io_manager():
-    """Pick the IOManager based on MANDELFLOW_STORAGE env var.
-
-    `zarr` (default): raw Zarr at ZARR_PATH. Fine for the local Dagster
-    demo — partitions write disjoint chunks so there's no contention.
-    `icechunk`: icechunk-backed Zarr at ICECHUNK_PATH. The architectural
-    target for s09 / s11 where multiple writers actually contend; each
-    partition becomes one commit.
-    """
     storage = os.environ.get("MANDELFLOW_STORAGE", "zarr").lower()
     if storage == "icechunk":
         return IcechunkFrameIOManager(
-            path=ICECHUNK_PATH,
-            n_frames=N_FRAMES,
-            resolution=RESOLUTION,
+            path=ICECHUNK_PATH, n_frames=CFG.n_frames, resolution=CFG.resolution,
         )
     return ZarrFrameIOManager(
-        path=ZARR_PATH,
-        n_frames=N_FRAMES,
-        resolution=RESOLUTION,
+        path=ZARR_PATH, n_frames=CFG.n_frames, resolution=CFG.resolution,
     )
 
 
-@asset(partitions_def=frame_partitions, io_manager_key="zarr_io")
-def iterations(context) -> np.ndarray:
-    """One frame of the Mandelbrot iteration array for the partitioned index.
+@asset(partitions_def=pod_partitions, io_manager_key="zarr_io")
+def iterations(context) -> dict[int, np.ndarray]:
+    """One Pod's contiguous range of frames.
 
-    The kernel comes from `stages.s07_zoom_local.compute` (which is itself
-    a re-export of s06's GPU shader). Swap the import at the top of this
-    module to test other kernels — the IOManager and partition shape stay
-    the same.
+    Partition key is the Pod index; the Pod owns a contiguous frame range
+    computed via `_frame_range_for_pod`. Frames are computed sequentially
+    within the Pod (sharing kernel state — e.g. one GL context across all
+    frames for the GPU kernel), and returned as a dict the IOManager
+    writes to storage.
     """
-    k = int(context.partition_key)
-    cr, ci, w = canonical_schedule(N_FRAMES)
+    pod_idx = int(context.partition_key)
+    start, end = _frame_range_for_pod(pod_idx)
+    cr, ci, w = canonical_schedule(CFG.n_frames, CFG.initial_width, CFG.final_width)
     context.log.info(
-        f"computing frame {k} of {N_FRAMES}: "
-        f"center=({cr[k]}, {ci[k]}) width={w[k]:.3g}"
+        f"pod {pod_idx}/{CFG.n_pods}: frames [{start}..{end}) — "
+        f"{describe(CFG)}"
     )
-    return compute_frame(
-        float(cr[k]), float(ci[k]), float(w[k]),
-        RESOLUTION, MAX_ITER,
-    )
+    out: dict[int, np.ndarray] = {}
+    for k in range(start, end):
+        out[k] = compute_frame(
+            float(cr[k]), float(ci[k]), float(w[k]),
+            CFG.resolution, CFG.max_iter,
+        )
+    return out
 
 
 defs = Definitions(
     assets=[iterations],
     executor=_select_executor(),
-    # IOManager key remains `zarr_io` for both backends — the asset's
-    # io_manager_key doesn't care which storage shim it gets.
     resources={"zarr_io": _select_io_manager()},
 )

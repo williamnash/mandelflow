@@ -13,6 +13,11 @@
 #   #2  E2_HIGHCPU_8 machine (8 vCPU vs default 2). ~30% faster
 #       wall-clock for CPU-bound steps like `uv sync`. Still within
 #       Cloud Build's 120 free min/day for this machine class.
+#
+#   #3  --provenance=false + --sbom=false skip BuildKit's SLSA
+#       attestation + SBOM export, which are ~3-4 min per build and
+#       which we don't consume. Re-enable if/when you need supply-chain
+#       attestations for releases.
 
 steps:
   - name: 'gcr.io/cloud-builders/docker'
@@ -27,6 +32,8 @@ steps:
         docker buildx build \
           --cache-from=type=registry,ref=us-central1-docker.pkg.dev/$PROJECT_ID/mandelflow/compute:cache \
           --cache-to=type=registry,ref=us-central1-docker.pkg.dev/$PROJECT_ID/mandelflow/compute:cache,mode=max \
+          --provenance=false \
+          --sbom=false \
           -t us-central1-docker.pkg.dev/$PROJECT_ID/mandelflow/compute:dev \
           --push \
           .

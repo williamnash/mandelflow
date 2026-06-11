@@ -9,13 +9,15 @@ output "cluster_location" {
 }
 
 output "artifact_registry_url" {
-  value       = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.mandelflow.repository_id}"
+  # AR repo is owned by s08's terraform; reconstructed here so callers don't
+  # have to cross-reference. Format mirrors `<region>-docker.pkg.dev/<project>/<repo>`.
+  value       = "${var.region}-docker.pkg.dev/${var.project_id}/mandelflow"
   description = "Prefix for image tags. Example: <url>/compute:dev"
 }
 
 output "zarr_bucket" {
-  value       = google_storage_bucket.zarr_outputs.url
-  description = "GCS bucket holding run.zarr stores."
+  value       = data.google_storage_bucket.zarr_outputs.url
+  description = "GCS bucket holding run.zarr stores (owned by s08's terraform)."
 }
 
 output "deploy_service_account" {

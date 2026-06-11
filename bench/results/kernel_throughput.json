@@ -1,0 +1,67 @@
+{
+  "machine": "Apple M2 Max",
+  "center": [
+    -0.75,
+    0.0
+  ],
+  "width": 3.5,
+  "max_iter": 256,
+  "stages": [
+    {
+      "label": "s00 naive",
+      "plot_label": "s00\nnaive",
+      "note": "interpreter",
+      "resolution": 200,
+      "seconds": 0.08951745799276978,
+      "mpx_per_s": 0.4468402130367772
+    },
+    {
+      "label": "s01 numpy",
+      "plot_label": "s01\nnumpy",
+      "note": "vectorised",
+      "resolution": 1000,
+      "seconds": 1.3243387090042233,
+      "mpx_per_s": 0.755093839061689
+    },
+    {
+      "label": "s02 numba",
+      "plot_label": "s02\nnumba",
+      "note": "JIT",
+      "resolution": 1000,
+      "seconds": 0.12326979200588539,
+      "mpx_per_s": 8.112287558271015
+    },
+    {
+      "label": "s03 numba opt",
+      "plot_label": "s03\nnumba opt",
+      "note": "+ early exit",
+      "resolution": 1000,
+      "seconds": 0.019330583047121763,
+      "mpx_per_s": 51.731497056365065
+    },
+    {
+      "label": "s04 dask local",
+      "plot_label": "s04\ndask local",
+      "note": "+ all cores",
+      "resolution": 1000,
+      "seconds": 0.007764582987874746,
+      "mpx_per_s": 128.78991718700289
+    },
+    {
+      "label": "s05 torch MPS",
+      "plot_label": "s05\ntorch MPS",
+      "note": "GPU, py-driven",
+      "resolution": 2000,
+      "seconds": 0.42505462502595037,
+      "mpx_per_s": 9.410555172187086
+    },
+    {
+      "label": "s06 shader",
+      "plot_label": "s06\nshader",
+      "note": "GPU, on-device",
+      "resolution": 2000,
+      "seconds": 0.008866249991115183,
+      "mpx_per_s": 451.1490206128156
+    }
+  ]
+}

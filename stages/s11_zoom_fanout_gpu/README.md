@@ -1,10 +1,25 @@
 # Stage 11 — Multi-machine fan-out on GKE, GPU kernel
 
-**Status: scaffold only.** Terraform skeleton + walkthrough; not provisioned, not pushed.
+**Status: scaffold only.** Architecture documented; not provisioned, not pushed.
 
-s11 takes [s10](../s10_zoom_cloud_gpu/)'s "single cloud GPU VM" and scales it across **many machines** by fanning frame ranges across a GKE cluster. Same kernel (s06 shader) running in each Pod, same multi-frame Zarr written to GCS — what's different is **how many machines write to it in parallel**.
+s11 takes [s10](../s10_zoom_cloud_gpu/)'s "single cloud GPU VM" and scales it across **many machines** by fanning frame ranges across a GKE cluster. Same kernel (s06 shader) running in each Pod, same multi-frame Zarr written to GCS — what changes is **how many machines write to it in parallel**.
 
 This is the stage where distributed compute earns its keep. It's also significantly more operational machinery than s10; only graduate here when single-machine throughput is actually the bottleneck.
+
+## Infrastructure is owned by s09
+
+The GKE cluster, CPU node pool, Workload Identity pool, runtime SA, and deploy SA are all provisioned by **`stages/s09_zoom_fanout_cpu/terraform/`**. s11 is not a separate cloud foundation — it's the *same* cluster with the GPU node pool turned on:
+
+```hcl
+# stages/s09_zoom_fanout_cpu/terraform/terraform.tfvars
+gpu_node_count   = 1                  # was 0 for s09
+gpu_machine_type = "n1-standard-4"    # carries one T4
+zone             = "us-central1-a"    # must have T4 quota
+```
+
+Then re-apply that terraform. Only one new resource is created — `google_container_node_pool.gpu_pool[0]` — and it's tainted `nvidia.com/gpu=present:NoSchedule` so non-GPU Pods can't accidentally land on it.
+
+This stage has no `terraform/` directory of its own on purpose: the infra story is "share the s09 cluster; add the GPU pool when you need it." Two terraform dirs that reference each other would teach the wrong lesson.
 
 ## Frame range per Pod, not frame per Pod
 
@@ -18,27 +33,28 @@ s11 instead **batches a range of frames per Pod**. Each Pod is essentially s07's
 | **30 frames/Pod** | **4** | **~45s** |
 | 60 frames/Pod | 2 | ~50s |
 
-The `--n-pods` argument in `run.py` lets the dispatcher tune this; default of 4 is a reasonable starting point at 120 frames. For longer zooms (e.g., 1000 frames) you'd want ~10 Pods of ~100 frames each.
+Dagster's `k8s_job_executor` with `max_concurrent: 16` plus a partition range covering all frames realises this — each in-flight partition is one Pod, each Pod processes its partition's frame range.
 
-## What gets provisioned
+## What gets provisioned (delta vs s09)
 
-| Resource | Purpose | Approx. cost |
+| Resource | Created by | Approx. cost |
 |---|---|---|
-| GKE **Standard** cluster | Control plane + node pools | ~$0.10/hr (zonal control plane) |
-| `n1-standard-4` + **T4 GPU** node pool (multi-node) | Compute Pods run here | ~$0.40/hr per node |
-| `e2-standard-2` node pool | Dagster control plane / IO Manager | ~$0.07/hr |
-| **Artifact Registry** (shared with s08/s10) | Docker image repo | pennies |
-| **GCS bucket** (can reuse s08/s10's) | `gs://<bucket>/runs/<id>.zarr` | pennies |
-| **Workload Identity Federation** pool | OIDC trust: GitHub Actions → GCP | free |
-| **Service Accounts** + IAM bindings | Pod → GCS via Workload Identity | free |
+| GKE Standard cluster | s09 terraform | ~$0.10/hr (zonal control plane) |
+| `e2-standard-2` CPU pool | s09 terraform | ~$0.07/hr |
+| `n1-standard-4` + **T4 GPU** pool | s09 terraform (`gpu_node_count > 0`) | ~$0.40/hr per node |
+| Workload Identity Federation pool | s09 terraform | free |
+| Compute / deploy SAs | s09 terraform | free |
+| Artifact Registry, GCS bucket | s08 terraform | pennies |
 
 **Expected weekend cost: $8–12** with prompt teardown. GKE Standard (not Autopilot) — Autopilot abstracts away the node-pool primitives this stage exists to teach (see `docs/GOTCHAS.md` #7).
 
-`terraform destroy` is the only safe path off the cost curve. **Set a phone alarm before `terraform apply`.**
+Teardown: bump `gpu_node_count` back to 0 and re-apply s09's terraform. The GPU pool is destroyed; the cluster lingers (still costs the zonal control-plane $0.10/hr). To remove the cluster entirely, `terraform destroy` in s09.
+
+**Set a phone alarm before `terraform apply`.**
 
 ## Credentials, in order
 
-Three credential paths, vs s08/s10's two — Workload Identity binding is the new one. Mid-step compared to running on a VM with an attached SA, but it's the right pattern for K8s.
+Three credential paths, vs s08/s10's two — Workload Identity binding is the new one.
 
 ### 1. Local Terraform / `gcloud`
 
@@ -52,7 +68,7 @@ ADC, no JSON keys.
 
 ### 2. CI / GitHub Actions → GCP (Workload Identity Federation)
 
-`.github/workflows/deploy.yml` expects WIF secrets (`GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_DEPLOY_SA`). The Terraform here provisions the WIF pool + provider + IAM bindings scoped to the GitHub repo. GitHub mints short-lived OIDC tokens; GCP swaps them for impersonation of `mandelflow-deploy@<project>.iam.gserviceaccount.com`. **No JSON keys.** See `docs/GOTCHAS.md` #6.
+`.github/workflows/deploy.yml` expects WIF secrets (`GCP_WORKLOAD_IDENTITY_PROVIDER`, `GCP_DEPLOY_SA`). s09's terraform provisions the WIF pool + provider + IAM bindings scoped to the GitHub repo. GitHub mints short-lived OIDC tokens; GCP swaps them for impersonation of `mandelflow-deploy@<project>.iam.gserviceaccount.com`. **No JSON keys.** See `docs/GOTCHAS.md` #6.
 
 ### 3. GKE Pods → GCS (Workload Identity binding)
 
@@ -63,104 +79,63 @@ The Kubernetes ServiceAccount `compute-sa` (in the `default` namespace) is bound
 ## Deployment flow
 
 ```bash
-# 0. Prerequisites: GCP project with billing enabled, T4 quota in your
-#    region (file a quota request if you haven't already — usually
-#    same-day approval).
+# 0. Prerequisites: GCP project with billing enabled, s08's terraform applied
+#    (provides bucket + AR + project APIs), T4 quota in your region.
 
-# 1. Fill in tfvars
-cp stages/s11_zoom_fanout_gpu/terraform/example.tfvars stages/s11_zoom_fanout_gpu/terraform/terraform.tfvars
-
-# 2. Provision (~10 min for first apply — GKE cluster creation is slow)
-cd stages/s11_zoom_fanout_gpu/terraform
-terraform init
+# 1. If you haven't already brought up the cluster for s09, do so now —
+#    same terraform, just with gpu_node_count > 0.
+cd stages/s09_zoom_fanout_cpu/terraform
+# edit terraform.tfvars: set gpu_node_count = 1
 terraform apply -var-file=terraform.tfvars
 
-# 3. Capture outputs into GitHub secrets and shell env
-terraform output
-gcloud container clusters get-credentials mandelflow --region <region>
+# 2. Cluster credentials + KSA setup
+gcloud container clusters get-credentials mandelflow --region us-central1
+kubectl create serviceaccount compute-sa 2>/dev/null || true
+kubectl annotate serviceaccount compute-sa --overwrite \
+  iam.gke.io/gcp-service-account=$(terraform output -raw compute_service_account)
 
-# 4. Set up the K8s ServiceAccount with Workload Identity annotation
-kubectl create serviceaccount compute-sa
-kubectl annotate serviceaccount compute-sa \\
-  iam.gke.io/gcp-service-account=mandelflow-compute@<project>.iam.gserviceaccount.com
+# 3. Build + push image (BuildKit, registry-backed cache)
+cd ../../..
+gcloud builds submit --config cloudbuild.yaml --region us-central1 .
 
-# 5. Build and push the image
-docker buildx build --platform linux/amd64 \\
-  -t <region>-docker.pkg.dev/<project>/mandelflow/compute:dev .
-docker push <region>-docker.pkg.dev/<project>/mandelflow/compute:dev
-
-# 6. Fan out
-python -m stages.s11_zoom_fanout_gpu.run \\
-  --mode dispatch --n-pods 4 \\
-  --n-frames 120 --resolution 1080 --max-iter 512 \\
-  --output gs://<bucket>/runs/dev.zarr
-
-# 7. Verify
-gsutil ls gs://<bucket>/runs/dev.zarr/iterations/
-
-# 8. TEAR IT DOWN
-terraform destroy -var-file=terraform.tfvars
-```
-
-## Two execution paths
-
-### Path A: Direct K8s Job submission (what `run.py` sketches)
-
-The dispatcher builds the schedule, computes frame ranges, and submits one K8s Job per range using the `kubernetes` Python client. It polls Job status, surfaces failures, and exits when all Jobs complete. No Dagster dependency.
-
-This is the path the local `dev/kind-cluster.yaml` validates — it spins up a CPU-only `kind` cluster on your laptop, so you can exercise the dispatch / submit / poll / retry logic without a real GKE bill or GPU.
-
-### Path B: Dagster K8s executor (the architectural target — implemented)
-
-`orchestration/definitions.py` now supports this directly. The `iterations` asset is partitioned by frame; Dagster's `k8s_job_executor` launches one Pod per partition. The asset graph is unchanged from local Dagster runs — only the executor config and the `IOManager` change, both selectable via env var:
-
-```bash
-# Materialize all 120 partitions across the GKE GPU pool, writing to GCS icechunk
+# 4. Fan out via Dagster's k8s_job_executor → GPU pool
 MANDELFLOW_EXECUTOR=k8s_gpu \
 MANDELFLOW_KERNEL=gpu_shader \
 MANDELFLOW_STORAGE=icechunk \
-MANDELFLOW_ICECHUNK_PATH=gs://mandelflow-2026-zarr/runs/s11.icechunk \
+MANDELFLOW_ICECHUNK_PATH=gs://<bucket>/runs/s11.icechunk \
 uv run dagster asset materialize \
   --module-name orchestration.definitions \
   --select iterations --partition-range 0000...0119
+
+# 5. Verify
+gsutil ls gs://<bucket>/runs/s11.icechunk/
+
+# 6. TEAR IT DOWN
+cd stages/s09_zoom_fanout_cpu/terraform
+# edit terraform.tfvars: set gpu_node_count = 0 (keeps the cluster for s09)
+# OR: terraform destroy to remove everything
+terraform apply -var-file=terraform.tfvars
 ```
 
-The k8s_gpu executor injects a `nvidia.com/gpu: Equal: present: NoSchedule` toleration plus a `nvidia.com/gpu: 1` resource limit into every Pod, so Pods schedule onto the tainted GPU node pool with the device-plugin-mounted T4 attached.
+## How the `k8s_gpu` executor scheduling works
 
-Env vars (`MANDELFLOW_*`) propagate from the local Dagster (laptop) into every spawned Pod, so each Pod re-loads `orchestration.definitions` with the same kernel/storage selection. Same code, both sides. See `orchestration/definitions.py` for the matrix.
+`orchestration/definitions.py::_k8s_executor(gpu=True)` injects, for every Pod Dagster launches:
 
-Path B requires (in order):
-- `~/.kube/config` set up — `gcloud container clusters get-credentials mandelflow --region us-central1`.
-- KSA `compute-sa` in the `default` namespace, annotated to impersonate `mandelflow-compute@<project>.iam.gserviceaccount.com` (created by Terraform; the KSA annotation is `kubectl annotate serviceaccount compute-sa iam.gke.io/gcp-service-account=...`).
-- T4 GPU quota in the project's region.
-- The image must be in Artifact Registry (rebuild after schema changes).
+- `nodeSelector` / toleration: `nvidia.com/gpu=present:NoSchedule` — matches the taint on the GPU pool nodes so Pods schedule onto T4 hardware.
+- Resource request: `nvidia.com/gpu: 1` — the GKE device plugin claims one T4 and mounts the CUDA / NVIDIA libs into the Pod.
+- `serviceAccountName: compute-sa` — picks up Workload Identity → GCS via the metadata server.
+- `imagePullPolicy: Always` — guarantees the latest tag, since we don't yet pin per-run.
+- Forwarded env vars: every `MANDELFLOW_*` from the local Dagster process so the Pod boots with the same kernel/storage/schedule.
 
-## What lives in each subdirectory
-
-```
-stages/s11_zoom_fanout_gpu/
-├── README.md          ← this file
-├── compute.py         ← re-exports s06's compute_frame (same kernel)
-├── run.py             ← --mode pod (per-Pod range entrypoint) +
-│                        --mode dispatch (control-host fan-out)
-├── terraform/         ← cluster, node pools, WIF, SAs, GCS bucket
-├── k8s/               ← Pod / Job manifests
-│   └── compute-pod.yaml
-└── dev/               ← local kind cluster for plumbing tests
-    └── kind-cluster.yaml
-```
+The asset graph (`iterations`) is unchanged from local runs. Only the executor + IOManager flips via env var.
 
 ## Known gaps before this stage runs
 
 In rough effort order:
 
 1. **T4 GPU quota** in your project's region.
-2. **`run.py` implementation** — both modes need filling in.
-3. **`orchestration/definitions.py`** if you want Path B.
-4. **`GCSIcechunkIOManager`** (or raw Zarr region writes) for parallel-safe per-chunk writes.
-5. **`compute-pod.yaml`** template needs to be parameterised on `frame_start`/`frame_end` instead of `frame_index`.
-
-The scaffolded files mark these with `# TODO(s11):` at the relevant spots.
+2. **`run.py` implementation** if you want Path A (direct K8s Job submission via the `kubernetes` client) instead of the Dagster path. Path B (Dagster `k8s_job_executor`) is implemented and validated against the matrix in `orchestration/definitions.py`.
+3. **Verify image has the GL/CUDA stack.** The current `Dockerfile` is multi-stage CUDA + Mesa EGL — should be fine, but s06 (`gpu_shader`) needs an EGL context inside the Pod. The first Pod will tell us.
 
 ## Why s11 still matters even when s10 is enough for the demo
 
@@ -168,7 +143,7 @@ s10 (a single GPU VM) is sufficient for shipping a portfolio-grade Mandelbrot zo
 
 - **Dask's `Client` + `dask.delayed` from s04 scales to a real cluster.** The same code pattern. Only the cluster connection changes.
 - **Workload Identity (not API keys) is how production cloud compute talks to storage.**
-- **Job-per-partition with right-sized partitions** is the canonical batch-compute pattern. Right-sizing is the engineering judgement.
+- **Job-per-partition with right-sized partitions** is the canonical batch-compute pattern. Right-sizing is the engineering judgement, and 30 frames/Pod here is exactly that judgement.
 
 If you're using this repo as a portfolio piece, s10 is what you demo; s11 is what you explain when someone asks "how would this scale?"
 
@@ -176,4 +151,4 @@ If you're using this repo as a portfolio piece, s10 is what you demo; s11 is wha
 
 - **Cloud Load Balancers persist if you don't delete them.** None of these manifests create one — but be vigilant.
 - **GPU node pools don't auto-scale down by default.** Tune `autoscaling { min_node_count = 0 }` in `gke.tf` if you want cluster-autoscaler to shrink between runs.
-- **Always run `terraform destroy`.** Reapplying is cheap; an idle GPU pool overnight is not.
+- **`gpu_node_count = 0` + re-apply** is the cheap teardown — keeps the cluster but drops the GPU bill. Full `terraform destroy` is the only way to zero the control-plane cost.

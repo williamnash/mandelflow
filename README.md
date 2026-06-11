@@ -1,5 +1,7 @@
 # mandelflow
 
+![A deep zoom into the Seahorse Valley of the Mandelbrot set — teal-and-cream spirals on a dusk gradient, rendered by the s06 GPU shader and coloured with the cyclic dusk palette.](docs/assets/hero.png)
+
 A data engineering scaling study, using the Mandelbrot set as a vehicle. Each stage produces the same data product — a labelled Zarr store of iteration counts — at progressively larger scales, using progressively more powerful tools. From a 200×200 frame computed by a single Python `for` loop, up to a 1000-frame deep-zoom animation rendered across GPU pods on Kubernetes, written in parallel to a Zarr in Google Cloud Storage.
 
 ## The architecture
@@ -10,7 +12,7 @@ The whole project hangs on one design choice: **the data product is the Zarr sto
 ┌──────────────────────┐   compute    ┌──────────────────────┐    read     ┌──────────────────────┐
 │   Dagster            │  ────────▶   │   Zarr store         │  ◀────────  │   render/  (PNGs,    │
 │   (asset model,      │              │   (local FS or       │             │   MP4, comparisons)  │
-│    frame partitions, │              │    gs://bucket)      │             └──────────────────────┘
+│    pod partitions,   │              │    gs://bucket)      │             └──────────────────────┘
 │    IOManagers)       │              │                      │    read     ┌──────────────────────┐
 └──────────────────────┘              │   xarray dataset,    │  ◀────────  │   FastAPI viewer     │
                                       │   self-describing,   │             │   (stage 12 — read-  │
@@ -66,6 +68,16 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for why Zarr, why xarray, why Dagster, wh
 
 **Reproducibility contract:** every stage marked ✓ must run from `uv sync` followed by `uv run python -m stages.<stage_id>.run` on a stock laptop. Stages requiring GPU or GCP credentials must fail with a single clear line naming the missing prerequisite — never silently, never with a stack trace.
 
+### What actually changes between stages
+
+The fractal is *identical* at every stage — same `compute_frame` contract, same pixels. What changes is **throughput**: measured on an Apple M2 Max, the single-frame kernel speeds up ~1,000× from s00 to s06. Each tile below paints the same fractal at that stage's real measured rate (pace log-compressed — the true span is ~1,000×):
+
+![Paint race: seven tiles of the same Mandelbrot fractal, each painting top-to-bottom at its stage's measured throughput. The GPU shader tile fills almost instantly while naive Python crawls, and the PyTorch/MPS tile is lapped by optimised CPU.](docs/assets/paint_race.gif)
+
+Note the **s05 dip** — a naive PyTorch/MPS port is *slower* than optimised CPU here, because the iteration loop is Python-driven (256 sequential GPU launches per frame, so it's launch-bound). The GPU only pays off at s06, where the whole loop runs on-device in the fragment shader.
+
+Exact figures are in [`bench/results/kernel_throughput.svg`](bench/results/kernel_throughput.svg). Regenerate the chart with `uv run python -m bench.kernel_throughput` and this animation with `uv run python -m bench.paint_race`.
+
 ## Quickstart
 
 ```bash
@@ -109,7 +121,7 @@ mandelflow/
 │   ├── s10_zoom_cloud_gpu/    # Single cloud VM, GPU kernel — placeholder
 │   ├── s11_zoom_fanout_gpu/   # GKE multi-Pod GPU fan-out + terraform/, k8s/, dev/
 │   └── s12_viewer_fastapi/    # FastAPI tile server (read-only)
-├── orchestration/           # Dagster: assets, frame partitions, IOManagers, resources
+├── orchestration/           # Dagster: assets, pod partitions, IOManagers, resources
 ├── render/                  # Zarr → PNG, MP4, side-by-side comparison plots
 ├── bench/                   # Aggregate timings across stages; talk-style charts
 └── docs/                    # DESIGN.md (the why), WEEKEND_PLAN.md, GOTCHAS.md

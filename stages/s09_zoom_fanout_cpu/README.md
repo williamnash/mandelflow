@@ -106,8 +106,34 @@ done
 
 Each iteration of this loop simulates one Cloud Run task. Sequentially they fill in the icechunk repo with all 20 frames (validated 2026-05-17 — 22 commits total in main, 20 frame commits + schema init + repo init).
 
+## Optional Path B — GKE via Dagster's `k8s_job_executor`
+
+The Cloud Run path above is the simpler architecture; the GKE path costs more and demands more ops, but is the same shape s11 uses for GPU fan-out. The `terraform/` directory in this stage provisions that GKE cluster (CPU pool always, GPU pool only when `gpu_node_count > 0` — i.e. when you graduate to s11).
+
+```bash
+cp stages/s09_zoom_fanout_cpu/terraform/example.tfvars \
+   stages/s09_zoom_fanout_cpu/terraform/terraform.tfvars
+cd stages/s09_zoom_fanout_cpu/terraform
+terraform init && terraform apply -var-file=terraform.tfvars   # ~10 min
+
+gcloud container clusters get-credentials mandelflow --region us-central1
+kubectl create serviceaccount compute-sa
+kubectl annotate serviceaccount compute-sa \
+  iam.gke.io/gcp-service-account=$(terraform output -raw compute_service_account)
+
+MANDELFLOW_EXECUTOR=k8s_cpu \
+MANDELFLOW_KERNEL=numba_cpu \
+MANDELFLOW_STORAGE=icechunk \
+MANDELFLOW_ICECHUNK_PATH=gs://<bucket>/runs/s09-gke.icechunk \
+uv run dagster asset materialize \
+  --module-name orchestration.definitions \
+  --select iterations --partition-range 0000...0119
+```
+
+s11 is exactly this with `gpu_node_count=1` in the same tfvars and `MANDELFLOW_EXECUTOR=k8s_gpu` at run time. See [s11's README](../s11_zoom_fanout_gpu/) for the GPU-specific notes (T4 quota, NoSchedule taint, image with the GL stack).
+
 ## Known follow-ups
 
-- **Terraform for the Cloud Run Job.** Currently the Job is created via `gcloud` (one command). For reproducibility this should land in `stages/s09_zoom_fanout_cpu/terraform/` as a `google_cloud_run_v2_job` resource.
+- **Terraform for the Cloud Run Job (Path A).** Currently the Job is created via `gcloud` (one command). For reproducibility this should land in `terraform/cloud_run.tf` as a `google_cloud_run_v2_job` resource.
 - **Image rebuild needed before first cloud run.** The current Artifact Registry image (`compute:dev`) was built before s09's code existed. Rebuild via `gcloud builds submit --config cloudbuild.yaml --region us-central1 .` (~2 min with the registry cache from `cloudbuild.yaml`).
 - **The dispatcher uses `subprocess.run("gcloud", ...)`.** That assumes the dispatcher host has gcloud installed + authenticated. A pure-Python path via the Cloud Run v2 SDK (`google-cloud-run`) would remove that dependency; we use the subprocess form because the SDK adds 10MB of deps and adds nothing for our use case.

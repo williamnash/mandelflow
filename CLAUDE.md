@@ -70,7 +70,9 @@ pyproject.toml           # uv-managed deps
 ## Pointers
 
 - `docs/DESIGN.md` — full architecture rationale.
+- `docs/FANOUT.md` — pod-partitioning deep-dive (Dagster + GKE fan-out shape).
 - `docs/LOCAL_DEV.md` — per-stage Mac developer checklist.
 - `docs/GOTCHAS.md` — known sharp edges; append when a new one is found.
+- `docs/CLOUD_SETUP.md` — provisioning playbook + cloud-specific gotchas.
 - `docs/WEEKEND_PLAN.md` — chronological build order.
 - `~/workspace/talks/tae-2025-11-21/` — the *Scalable Computing with the Mandelbrot Set* talk this repo extends.

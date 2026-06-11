@@ -9,6 +9,7 @@ Committed bench outputs are **SVG for charts** and **JSON for raw numbers**. PNG
 - `results/<run-id>.json` — wall time, peak memory, iteration count, scale parameters per stage. Small (~1 KB each).
 - `results/scaling.svg` — regenerable comparison chart across stages.
 - `results/speedup.svg` — speedup bar chart against stage 00.
+- `results/kernel_throughput.{svg,json}` — **measured** s00–s06 kernel throughput on the machine that ran it (`uv run python -m bench.kernel_throughput`). The README's per-stage speed chart.
 
 Regenerate everything from the committed JSONs:
 

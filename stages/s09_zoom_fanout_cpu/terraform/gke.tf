@@ -1,6 +1,6 @@
-# GKE Standard cluster with two node pools:
-# - A small default CPU pool for Dagster control plane / IO managers / scheduling
-# - A GPU pool with T4s for the per-frame compute Pods
+# GKE Standard cluster with a CPU node pool (always created) and an optional
+# GPU node pool. s09 uses the CPU pool only; s11 sets `gpu_node_count > 0` to
+# add T4-equipped nodes for the GPU-kernel Pods.
 #
 # We use Standard (not Autopilot) on purpose — Autopilot abstracts away the
 # node-pool primitives, GPU taints, and Workload Identity wiring that this
@@ -15,6 +15,15 @@ resource "google_container_cluster" "mandelflow" {
   remove_default_node_pool = true
   initial_node_count       = 1
 
+  # GKE defaults `deletion_protection` to true on newer providers. For a
+  # teaching repo with frequent up/down cycles, this fights us — terraform
+  # destroy refuses with a "deletion_protection is set" error and requires
+  # a manual `gcloud container clusters update --no-deletion-protection`
+  # before retry. Explicitly set to false so terraform destroy works.
+  # For a production cluster, leave at default (true) and use `terraform
+  # state rm` if you really need to destroy.
+  deletion_protection = false
+
   workload_identity_config {
     workload_pool = "${var.project_id}.svc.id.goog"
   }
@@ -28,12 +37,23 @@ resource "google_container_cluster" "mandelflow" {
   ]
 }
 
-# Small CPU pool for Dagster control plane, IO Managers, and any non-compute Pods.
+# CPU pool. Autoscales 1..max during the run, scales back to 1 when idle
+# so the cluster has somewhere to host system Pods (DNS, metrics-server,
+# Dagster control plane if/when added) but isn't paying for fan-out
+# capacity between runs.
+#
+# Each Pod requests 1–2 vCPU; e2-standard-2 fits one fan-out Pod plus a
+# small amount of system overhead per node. With max 8 nodes we can run
+# our default n_pods=8 with one Pod per node, in parallel.
 resource "google_container_node_pool" "cpu_pool" {
-  name       = "cpu-pool"
-  cluster    = google_container_cluster.mandelflow.id
-  location   = var.region
-  node_count = 1
+  name     = "cpu-pool"
+  cluster  = google_container_cluster.mandelflow.id
+  location = var.region
+
+  autoscaling {
+    min_node_count = var.cpu_min_nodes
+    max_node_count = var.cpu_max_nodes
+  }
 
   node_config {
     machine_type = "e2-standard-2"
@@ -50,7 +70,12 @@ resource "google_container_node_pool" "cpu_pool" {
 
 # GPU pool. Zonal (T4s are zonal resources). Tainted so only GPU-tolerant
 # Pods land here — the compute Pods spec includes the matching toleration.
+#
+# Conditional: when `gpu_node_count == 0` (s09 default) the pool is not
+# created, so the cluster carries no GPU cost. s11 sets the var to >= 1.
 resource "google_container_node_pool" "gpu_pool" {
+  count = var.gpu_node_count > 0 ? 1 : 0
+
   name       = "gpu-pool"
   cluster    = google_container_cluster.mandelflow.id
   location   = var.zone
@@ -80,7 +105,7 @@ resource "google_container_node_pool" "gpu_pool" {
     ]
   }
 
-  # TODO(s11): autoscaling block. For demo, fixed `var.gpu_node_count` is simpler.
+  # TODO: autoscaling block. For demo, a fixed `var.gpu_node_count` is simpler.
   # For real batch fan-out, set min_node_count=0 and let cluster-autoscaler
   # scale to zero between runs.
 }

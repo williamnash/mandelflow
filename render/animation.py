@@ -1,14 +1,14 @@
 """Multi-frame Zarr → MP4 stitcher.
 
 Pixel-perfect: PNG frame dimensions match the iteration array exactly.
-Each frame's iterations array is colormapped via matplotlib's palette,
+Each frame's iterations array is coloured via `render.palettes.colorize`,
 converted to 8-bit RGB, and saved through PIL — no matplotlib axis /
 canvas system in the loop, so there's no margin-trimming and no
 up/downsampling.
 
-Frames are normalised to a fixed `[0, max_value]` range (the global max
-across all frames) so colours stay consistent throughout the zoom.
-Per-frame normalisation would flicker as the iteration range shifts.
+Colouring is the cyclic √-count mapping from `render.palettes`: per-pixel
+and statistic-free, so colours stay consistent throughout the zoom with no
+flicker — there is no global or per-frame normalisation to drift.
 
 For a 4K square (2160×2160) demo zoom: compute at `--resolution 2160`,
 then run this stitcher. The MP4 output ends up at 2160×2160.
@@ -21,18 +21,43 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-import matplotlib
 import numpy as np
 import xarray as xr
 from PIL import Image
+
+from render.palettes import DEFAULT_FREQ, DEFAULT_PALETTE, colorize
+
+
+def _open_dataset(path: str | Path) -> xr.Dataset:
+    """Open an iterations dataset from raw Zarr or an icechunk repo.
+
+    Detects icechunk by the `.icechunk` suffix on the path. Both backends
+    expose an xarray-compatible Zarr store; the only difference is how we
+    obtain it (raw-zarr opens directly; icechunk opens a readonly session
+    on the `main` branch and uses its store).
+    """
+    path_str = str(path).rstrip("/")
+    if path_str.endswith(".icechunk"):
+        import icechunk
+        if path_str.startswith("gs://"):
+            parts = path_str[5:].split("/", 1)
+            bucket = parts[0]
+            prefix = parts[1] if len(parts) > 1 else ""
+            storage = icechunk.gcs_storage(bucket=bucket, prefix=prefix)
+        else:
+            storage = icechunk.local_filesystem_storage(path_str)
+        repo = icechunk.Repository.open(storage)
+        return xr.open_zarr(repo.readonly_session("main").store)
+    return xr.open_zarr(path_str)
 
 
 def render_zarr_to_mp4(
     zarr_path: str | Path,
     output_path: str | Path,
     fps: int = 30,
-    cmap: str = "twilight_shifted",
+    cmap: str = DEFAULT_PALETTE,
     crf: int = 18,
+    freq: float = DEFAULT_FREQ,
 ) -> None:
     """Stitch every frame of a multi-frame Zarr into an MP4.
 
@@ -43,21 +68,25 @@ def render_zarr_to_mp4(
 
     `crf` controls quality: 17 ≈ visually lossless, 23 = ffmpeg
     default, 28 = noticeable artifacts. Lower = bigger file.
+
+    Accepts both raw Zarr stores and icechunk repos. Path types:
+      - `path/to/run.zarr`            → raw Zarr (local FS)
+      - `gs://bucket/run.zarr`        → raw Zarr in GCS
+      - `path/to/run.icechunk`        → icechunk repo (local FS)
+      - `gs://bucket/run.icechunk`    → icechunk repo in GCS
     """
-    ds = xr.open_zarr(zarr_path)
+    ds = _open_dataset(zarr_path)
     n_frames = ds.sizes["frame"]
     if n_frames < 1:
         raise ValueError(f"Zarr {zarr_path} has no frames.")
 
-    global_max = max(int(ds.iterations.max().compute()), 1)
-    palette = matplotlib.colormaps[cmap]
-
     with tempfile.TemporaryDirectory() as tmpdir:
         for k in range(n_frames):
             iters = ds.iterations.isel(frame=k).values
-            # Normalize to [0,1], apply colormap → (H, W, 4) float, take RGB.
-            normalized = iters.astype(np.float32) / global_max
-            rgb = (palette(normalized)[..., :3] * 255).astype(np.uint8)
+            # Cyclic √-count colouring (see render.palettes): per-pixel and
+            # stat-free, so it is temporally stable frame to frame with no
+            # global-max bookkeeping. The set is painted black inside colorize.
+            rgb = colorize(iters, cmap=cmap, freq=freq)
             # The shader stores y increasing with row index (math orientation);
             # PIL / video stores rows top-down (image orientation). Flip once.
             rgb = np.flipud(rgb)
@@ -89,24 +118,36 @@ def render_zarr_to_mp4(
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Render a multi-frame Zarr to MP4")
-    parser.add_argument("--input", type=Path, required=True)
+    # Input is `str` not `Path` so argparse doesn't collapse `gs://...` to
+    # `gs:/...` (Path's path-normalisation rule).
+    parser.add_argument("--input", type=str, required=True)
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--fps", type=int, default=30,
                         help="Frame rate. Lower = slower playback. 24 = cinematic, 30 = standard, 60 = smooth.")
-    parser.add_argument("--cmap", default="twilight_shifted",
-                        help="matplotlib colormap. Try 'magma', 'inferno', 'viridis', 'twilight'.")
+    parser.add_argument("--cmap", default=DEFAULT_PALETTE,
+                        help="Palette name. Custom: 'dusk', 'ultrafractal', 'ember'. "
+                             "Or any cyclic matplotlib map: 'twilight', 'hsv'.")
+    parser.add_argument("--freq", type=float, default=DEFAULT_FREQ,
+                        help="Cyclic palette frequency (higher = denser colour bands).")
     parser.add_argument("--crf", type=int, default=18,
                         help="x264 quality. 17 = visually lossless, 23 = default, 28 = artifacts.")
     args = parser.parse_args(argv)
 
     if args.output is None:
-        args.output = args.input.with_suffix(".mp4")
+        # Derive output filename from input — strip URL prefix + scheme,
+        # take the basename, swap suffix to .mp4.
+        stem = Path(args.input.rstrip("/")).name
+        if stem.endswith(".icechunk"):
+            stem = stem[: -len(".icechunk")]
+        elif stem.endswith(".zarr"):
+            stem = stem[: -len(".zarr")]
+        args.output = Path(f"out/{stem}.mp4")
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"animation: {args.input}")
     render_zarr_to_mp4(
         args.input, args.output,
-        fps=args.fps, cmap=args.cmap, crf=args.crf,
+        fps=args.fps, cmap=args.cmap, crf=args.crf, freq=args.freq,
     )
     print(f"  wrote: {args.output}")
 
