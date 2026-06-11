@@ -42,7 +42,7 @@ import xarray as xr
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import HTMLResponse
 
-from common.store import STORE_SUFFIXES, open_iterations_dataset
+from common.store import STORE_SUFFIXES, list_stores, open_iterations_dataset
 from render.palettes import DEFAULT_FREQ, DEFAULT_PALETTE, available, colorize
 
 TILE_SIZE = 256
@@ -56,20 +56,7 @@ def _store_root() -> str:
 
 
 def _list_runs(root: str) -> list[str]:
-    if root.startswith("gs://"):
-        import gcsfs
-
-        fs = gcsfs.GCSFileSystem()
-        try:
-            entries = fs.ls(root[len("gs://"):])
-        except FileNotFoundError:
-            return []
-        return sorted(e.rstrip("/").rsplit("/", 1)[-1] for e in entries
-                      if e.rstrip("/").endswith(STORE_SUFFIXES))
-    path = Path(root)
-    if not path.is_dir():
-        return []
-    return sorted(p.name for p in path.iterdir() if p.name.endswith(STORE_SUFFIXES))
+    return list_stores(root)
 
 
 def _validate_run_id(run_id: str) -> None:
@@ -82,8 +69,8 @@ def _validate_run_id(run_id: str) -> None:
 
 def _cache_token(root: str, run_id: str) -> int:
     """Local stores: the directory mtime, so a rewritten run busts the
-    cache. gs:// stores: constant (snapshot pinned until restart)."""
-    if root.startswith("gs://"):
+    cache. Object-store roots: constant (snapshot pinned until restart)."""
+    if "://" in root:
         return 0
     try:
         return Path(root, run_id).stat().st_mtime_ns

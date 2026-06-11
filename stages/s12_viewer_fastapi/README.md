@@ -26,7 +26,7 @@ uv run uvicorn stages.s12_viewer_fastapi.main:app    # or: make viewer
 
 The UI at `/` is one static HTML page driving the JSON API: pick a run, scrub or play through frames, switch palettes and band frequency live, and pan/zoom the tile map (Leaflet via CDN — the page needs internet for the library; the data never leaves your machine).
 
-The store root defaults to `out/`; point elsewhere with `MANDELFLOW_STORE_ROOT=/path/to/stores` or `MANDELFLOW_STORE_ROOT=gs://bucket/prefix` (raw `.zarr` and `.icechunk` runs both work — `common.store.open_iterations_dataset` handles either backend, and gs:// listing goes through gcsfs). For local roots a deleted-and-rewritten run is picked up without a restart (caches key on the store directory's mtime); gs:// runs and in-place icechunk commits serve the snapshot first opened until restart.
+The store root defaults to `out/`; point elsewhere with `MANDELFLOW_STORE_ROOT=/path/to/stores` or `MANDELFLOW_STORE_ROOT=gs://bucket/prefix` / `s3://bucket/prefix` (raw `.zarr` and `.icechunk` runs all work — `common.store.open_iterations_dataset` and `list_stores` handle every backend). For local roots a deleted-and-rewritten run is picked up without a restart (caches key on the store directory's mtime); object-store runs and in-place icechunk commits serve the snapshot first opened until restart.
 
 ## Endpoints
 
