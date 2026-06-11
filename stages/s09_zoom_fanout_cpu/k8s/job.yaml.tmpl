@@ -31,10 +31,18 @@ spec:
   completionMode: Indexed
   completions: {N_PODS}
   parallelism: {N_PODS}
-  # backoffLimit 0: a Pod failure stops the whole batch. Easier to
-  # diagnose during development than letting failed slices retry and
-  # the rest succeed silently. Bump to 2-3 for production batch runs.
-  backoffLimit: 0
+  # A real app crash should stop the batch quickly (backoffLimit 3),
+  # but infra churn must not: while the autoscaler is still bringing
+  # nodes up, Pods get preempted/evicted, and each such death would
+  # burn the backoff budget before capacity even exists (this killed
+  # run portfolio-stride-001 46s after dispatch). DisruptionTarget is
+  # set exactly on those kills, so we ignore them.
+  backoffLimit: 3
+  podFailurePolicy:
+    rules:
+    - action: Ignore
+      onPodConditions:
+      - type: DisruptionTarget
   # Pods drop their ephemeral state when the Job is deleted; logs are
   # kept for 1h via ttlSecondsAfterFinished (manual cleanup otherwise).
   ttlSecondsAfterFinished: 3600
