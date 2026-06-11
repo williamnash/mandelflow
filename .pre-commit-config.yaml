@@ -1,0 +1,16 @@
+# `pre-commit install` once after cloning. Mirrors what CI enforces
+# (ruff check) — deliberately no formatter: the codebase uses hand-aligned
+# tables that ruff-format would churn.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-added-large-files
+        args: [--maxkb=600]   # bench SVGs are ~100-300 KB; Zarrs/MP4s must never land
+      - id: end-of-file-fixer
