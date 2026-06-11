@@ -108,8 +108,18 @@ def _open_repo(path: str):
     return icechunk.Repository.open_or_create(storage)
 
 
-def _init_schema(repo, n_frames: int, resolution: int) -> None:
-    """Idempotent: write the dataset schema if `iterations` is missing."""
+def _init_schema(repo, cfg: RunConfig) -> None:
+    """Idempotent: write the dataset schema if `iterations` is missing.
+
+    Coords are fully populated here, from the canonical schedule — the
+    dispatcher knows the whole zoom path, and nothing about the coords
+    is per-task. Tasks then write *only* iteration chunks. The earlier
+    shape (NaN coords at init, each task region-writing its own coord
+    values) lost 3/4 of the coords in portfolio-stride-002: each 1-D
+    coord array is a single chunk, so every task's commit carried a
+    full copy that was NaN outside its own frames, and the rebase kept
+    whichever landed last.
+    """
     try:
         session = repo.readonly_session("main")
         ds = xr.open_zarr(session.store)
@@ -118,19 +128,20 @@ def _init_schema(repo, n_frames: int, resolution: int) -> None:
     except Exception:
         pass
 
+    cr, ci, w = canonical_schedule(cfg.n_frames, cfg.initial_width, cfg.final_width)
     iterations = np.zeros(
-        (n_frames, resolution, resolution), dtype=ITERATIONS_DTYPE
+        (cfg.n_frames, cfg.resolution, cfg.resolution), dtype=ITERATIONS_DTYPE
     )
     ds = xr.Dataset(
         data_vars={"iterations": (("frame", "y", "x"), iterations)},
         coords={
-            "frame": np.arange(n_frames, dtype=np.int32),
-            "center_re": ("frame", np.full(n_frames, np.nan)),
-            "center_im": ("frame", np.full(n_frames, np.nan)),
-            "width": ("frame", np.full(n_frames, np.nan)),
+            "frame": np.arange(cfg.n_frames, dtype=np.int32),
+            "center_re": ("frame", np.asarray(cr, dtype=np.float64)),
+            "center_im": ("frame", np.asarray(ci, dtype=np.float64)),
+            "width": ("frame", np.asarray(w, dtype=np.float64)),
         },
     )
-    encoding = {"iterations": {"chunks": (1, resolution, resolution)}}
+    encoding = {"iterations": {"chunks": (1, cfg.resolution, cfg.resolution)}}
     session = repo.writable_session("main")
     ds.to_zarr(session.store, mode="w", encoding=encoding, zarr_format=3)
     session.commit("initialize iterations dataset schema")
@@ -169,7 +180,7 @@ def run_task(task_index: int, task_count: int) -> None:
     # fan-out so this is a no-op. Local validation (running tasks one
     # at a time without a dispatcher) hits the init path on the first
     # task only.
-    _init_schema(repo, cfg.n_frames, cfg.resolution)
+    _init_schema(repo, cfg)
 
     cr, ci, w = canonical_schedule(cfg.n_frames, cfg.initial_width, cfg.final_width)
 
@@ -181,18 +192,15 @@ def run_task(task_index: int, task_count: int) -> None:
             float(cr[k]), float(ci[k]), float(w[k]),
             cfg.resolution, cfg.max_iter,
         )
+        # Iterations only — coords were fully written at schema init.
+        # Including coords here would re-write the shared single-chunk
+        # coord arrays and race against every other task's commit.
         ds_frame = xr.Dataset(
             data_vars={
                 "iterations": (
                     ("frame", "y", "x"),
                     iters.astype(ITERATIONS_DTYPE)[None, :, :],
                 )
-            },
-            coords={
-                "frame": np.array([k], dtype=np.int32),
-                "center_re": ("frame", np.array([float(cr[k])])),
-                "center_im": ("frame", np.array([float(ci[k])])),
-                "width": ("frame", np.array([float(w[k])])),
             },
         )
         ds_frame.to_zarr(session.store, region={"frame": slice(k, k + 1)})
@@ -412,7 +420,7 @@ def run_dispatch(argv: list[str] | None) -> None:
     if not args.dry_run:
         print("  initialising icechunk repo + schema...", file=log, flush=True)
         repo = _open_repo(output)
-        _init_schema(repo, cfg.n_frames, cfg.resolution)
+        _init_schema(repo, cfg)
         print("  ✓ repo ready", file=log, flush=True)
 
     if args.target == "cloudrun":

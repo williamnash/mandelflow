@@ -56,8 +56,11 @@ should have no NaN.
 
 > Implemented as `common/config.py::frame_indices_for_pod` (stride
 > sharding), wired into `run_task` and the Dagster `iterations` asset;
-> unit-tested in `tests/unit/common/test_config.py`. Original writeup
-> kept below for the record.
+> unit-tested in `tests/unit/common/test_config.py`. **Validated on GKE
+> 2026-06-11** (`bench/results/s09_portfolio_stride.json`): same
+> portfolio workload, 4 pods — makespan 8m33s vs this baseline's 21min
+> (**2.46×**), per-task compute max/mean **1.30×** vs 17×. Original
+> writeup kept below for the record.
 
 **Discovered:** portfolio-003 wall-clock was 21 min total. Pod 0 finished
 in 58 s; Pod 3 took ~17 min. **17× imbalance.**
@@ -83,7 +86,16 @@ correct.
 add a sibling `frame_indices_for_pod`) + update `run_task` and the
 Dagster asset to use the new shape.
 
-### 3. Pre-populating coords at schema init (companion to #1)
+### 3. ✅ DONE — Pre-populating coords at schema init (companion to #1)
+
+> Implemented: `_init_schema` now takes the `RunConfig` and writes all
+> coords from the canonical schedule; task region-writes carry only the
+> iterations variable. The race was confirmed in production first —
+> portfolio-stride-002 landed 600/600 iteration frames but only 150/600
+> coords (each 1-D coord array is one chunk; every task's commit carried
+> a full copy, NaN outside its own frames, and the rebase kept the last
+> one). Pinned by `tests/integration/test_s09_coords.py`. Original
+> writeup kept below.
 
 **Same fix as #1.** Listing separately because the *coord-populated*
 schema init is also what makes the data scientifically clean — every

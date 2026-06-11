@@ -1,0 +1,43 @@
+{
+  "run_id": "portfolio-stride-002",
+  "date": "2026-06-11",
+  "platform": "GKE Standard, regional us-central1, e2-standard-2 CPU pool (autoscaling 1-8)",
+  "workload": {
+    "preset": "portfolio",
+    "n_frames": 600,
+    "resolution": 1080,
+    "max_iter": 2048,
+    "final_width": 1e-06,
+    "n_pods": 4,
+    "kernel": "numba_cpu (s03)",
+    "sharding": "stride (frame_indices_for_pod)"
+  },
+  "job": {
+    "name": "mandelflow-1781147318",
+    "start": "2026-06-11T03:08:39Z",
+    "completion": "2026-06-11T03:17:12Z",
+    "makespan_seconds": 513,
+    "succeeded": 4,
+    "failed": 0
+  },
+  "tasks": [
+    {"task": 0, "frames": 150, "compute_seconds": 188.5, "ms_per_frame": 1256, "commit": "ZT018RV9"},
+    {"task": 1, "frames": 150, "compute_seconds": 389.3, "ms_per_frame": 2595, "commit": "3MGTSJKM"},
+    {"task": 2, "frames": 150, "compute_seconds": 305.2, "ms_per_frame": 2035, "commit": "JZ9WX1RC"},
+    {"task": 3, "frames": 150, "compute_seconds": 316.9, "ms_per_frame": 2113, "commit": "5RABRQX0"}
+  ],
+  "balance": {
+    "max_over_mean_compute": 1.30,
+    "max_over_min_compute": 2.07,
+    "note": "Residual spread is node heterogeneity / scale-up timing, not sharding: every task owns an identical shallow-to-deep frame mix."
+  },
+  "baseline_comparison": {
+    "baseline_run": "portfolio-003 (contiguous frame_range_for_pod, same preset, 4 pods)",
+    "baseline_makespan_seconds": 1260,
+    "baseline_imbalance": "pod 0 58s vs pod 3 ~17min (~17x)",
+    "speedup_makespan": 2.46
+  },
+  "known_issues": [
+    "Per-frame coords (center_re/center_im/width) landed for only 150/600 frames: all tasks region-write the same single-chunk coord arrays and the rebase keeps the last committer's chunk. Iterations are unaffected (one chunk per frame, disjoint). Fix: pre-populate coords at schema init (NEXT_STEPS #1/#3)."
+  ]
+}
