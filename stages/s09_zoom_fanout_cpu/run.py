@@ -48,6 +48,7 @@ import numpy as np
 import xarray as xr
 
 from common.config import RunConfig, describe, frame_range_for_pod, from_env
+from common.gcp import require_gcp_credentials
 from common.schedule import canonical_schedule
 from common.store import ITERATIONS_DTYPE
 
@@ -398,6 +399,7 @@ def run_dispatch(argv: list[str] | None) -> None:
 
     # Init icechunk schema once on the dispatcher (avoid open_or_create race).
     if not args.dry_run:
+        require_gcp_credentials("Stage 09", output)
         print("  initialising icechunk repo + schema...", file=log, flush=True)
         repo = _open_repo(output)
         _init_schema(repo, cfg.n_frames, cfg.resolution)

@@ -31,6 +31,7 @@ from pathlib import Path
 
 from dask.distributed import Client, LocalCluster
 
+from common.gcp import require_gcp_credentials
 from common.schedule import canonical_schedule
 from common.store import create_iterations_dataset, write_frame
 from stages.s08_zoom_cloud_cpu.compute import compute_frame
@@ -89,6 +90,8 @@ def main(argv: list[str] | None = None) -> None:
         help="Tiles per side for intra-frame fanout (so n_tiles**2 tasks per frame).",
     )
     args = parser.parse_args(argv)
+
+    require_gcp_credentials("Stage 08", args.output)
 
     # Only create parent dirs for local paths; gs:// has no concept of dirs.
     if not args.output.startswith("gs://"):

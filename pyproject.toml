@@ -5,6 +5,16 @@ description = "A data engineering scaling study using the Mandelbrot set"
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "William Nash", email = "william.a.nash92@gmail.com" }]
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["mandelbrot", "data-engineering", "zarr", "dagster", "gpu", "kubernetes", "scaling"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
 
 dependencies = [
     # Core compute
@@ -44,6 +54,9 @@ cloud = [
     "dagster-k8s>=0.25",            # K8s executor for stage 08
     "dagster-gcp>=0.25",            # GCS resources
 ]
+
+[project.urls]
+Repository = "https://github.com/williamnash/mandelflow"
 
 [dependency-groups]
 dev = [
