@@ -27,6 +27,7 @@ dependencies = [
     "xarray>=2024.10",              # stable Zarr v3 support
     "icechunk>=0.2",
     "gcsfs>=2024.10",               # GCS-backed stores for stage 08
+    "google-auth>=2.30",            # credential preflight (common/gcp.py); don't rely on it transitively
 
     # Distributed compute
     "dask[distributed]>=2024.10",

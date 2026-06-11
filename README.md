@@ -95,7 +95,7 @@ uv run python -m render.frame --input out/s00_naive.zarr
 uv run dagster dev -m orchestration.definitions
 
 # Re-render an existing Zarr with a different colormap
-uv run python -m render.animation runs/2026-05-16.zarr --palette twilight
+uv run python -m render.animation --input out/run.zarr --cmap twilight
 
 # Stage 12: tile server over precomputed Zarrs (CPU-only)
 uv run uvicorn stages.s12_viewer_fastapi.main:app
@@ -143,7 +143,7 @@ mandelflow/
 - [x] **Stage 09** — Multi-machine CPU fan-out via Cloud Run Jobs / GKE Indexed Jobs; first successful cloud fan-out validated end-to-end.
 - [ ] **Stage 10** — Single cloud VM with a GPU, s06 kernel — placeholder (GCP quota blocked on new project; may target multi-cloud).
 - [ ] **Stage 11** — GPU node pool on the s09 GKE cluster; frame ranges fanned across Pods via Dagster K8s executor; icechunk repo in `gs://bucket/run.icechunk` via the `IcechunkFrameIOManager` in `orchestration/definitions.py`.
-- [x] **Stage 12** — FastAPI tile server over precomputed Zarrs (frame PNGs + slippy-map tiles). Pure CPU; deploys to Cloud Run and scales to zero.
+- [x] **Stage 12** — FastAPI tile server over precomputed Zarrs (frame PNGs + slippy-map tiles). Pure CPU, Cloud-Run-ready (the deploy workflow stays gated until WIF secrets are configured).
 - [x] **CI** — `pr.yml` runs the test suite (GPU/GL tests self-skip on hosted runners), validates Dagster definitions, and fmt-checks + validates both Terraform stacks.
 - [ ] **`bench/`** — aggregate run.json across stages, regenerate the talk-style scaling chart.
 

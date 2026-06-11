@@ -15,14 +15,19 @@ deliberately out of scope (DESIGN.md §11).
 
 Tiles are sliced from the stored iterations array per request rather than
 from a pregenerated pyramid: one frame is one Zarr chunk, so the read is a
-single chunk fetch and the quadtree arithmetic is just array slicing. A
-materialised pyramid (DESIGN.md §11) becomes worthwhile when frames outgrow
-"slice + resize in a request" — it would slot in behind the same URL shape.
+single chunk fetch and the quadtree arithmetic is just array slicing. The
+colourised frame is LRU-cached, so a viewport's worth of tile requests
+pays one chunk read + one colorize, then pure slicing. A materialised
+pyramid (DESIGN.md §11) becomes worthwhile when frames outgrow that — it
+would slot in behind the same URL shape.
 
-The store root comes from `MANDELFLOW_STORE_ROOT` (default `out/`), read
-per request so one process can follow a remounted volume. Run IDs are
-validated against the actual directory listing, which doubles as path-
-traversal protection: only direct children of the root are addressable.
+The store root comes from `MANDELFLOW_STORE_ROOT` (default `out/`) and may
+be a local directory or a `gs://bucket/prefix`. Run IDs must be bare child
+names ending in a known store suffix — path-shaped IDs are rejected before
+any filesystem access. For local roots, caches are keyed by the store
+directory's mtime, so a deleted-and-rewritten run is picked up without a
+restart; an in-place icechunk commit (which may not touch the root dir's
+mtime) and gs:// roots serve the snapshot first opened until restart.
 """
 
 from __future__ import annotations
@@ -36,43 +41,93 @@ import numpy as np
 import xarray as xr
 from fastapi import FastAPI, HTTPException, Response
 
-from common.store import open_iterations_dataset
-from render.palettes import DEFAULT_FREQ, DEFAULT_PALETTE, colorize, get_cmap
+from common.store import STORE_SUFFIXES, open_iterations_dataset
+from render.palettes import DEFAULT_FREQ, DEFAULT_PALETTE, colorize
 
 TILE_SIZE = 256
-RUN_SUFFIXES = (".zarr", ".icechunk")
 
 app = FastAPI(title="mandelflow viewer", docs_url="/docs")
 
 
-def _store_root() -> Path:
-    return Path(os.environ.get("MANDELFLOW_STORE_ROOT", "out"))
+def _store_root() -> str:
+    return os.environ.get("MANDELFLOW_STORE_ROOT", "out").rstrip("/")
 
 
-def _list_runs(root: Path) -> list[str]:
-    if not root.is_dir():
+def _list_runs(root: str) -> list[str]:
+    if root.startswith("gs://"):
+        import gcsfs
+
+        fs = gcsfs.GCSFileSystem()
+        try:
+            entries = fs.ls(root[len("gs://"):])
+        except FileNotFoundError:
+            return []
+        return sorted(e.rstrip("/").rsplit("/", 1)[-1] for e in entries
+                      if e.rstrip("/").endswith(STORE_SUFFIXES))
+    path = Path(root)
+    if not path.is_dir():
         return []
-    return sorted(p.name for p in root.iterdir() if p.name.endswith(RUN_SUFFIXES))
+    return sorted(p.name for p in path.iterdir() if p.name.endswith(STORE_SUFFIXES))
+
+
+def _validate_run_id(run_id: str) -> None:
+    """Traversal protection without a per-request directory listing: a run
+    ID must be a bare child name in a known store format."""
+    if ("/" in run_id or "\\" in run_id or run_id.startswith(".")
+            or not run_id.endswith(STORE_SUFFIXES)):
+        raise HTTPException(404, detail=f"run {run_id!r} is not a valid run id")
+
+
+def _cache_token(root: str, run_id: str) -> int:
+    """Local stores: the directory mtime, so a rewritten run busts the
+    cache. gs:// stores: constant (snapshot pinned until restart)."""
+    if root.startswith("gs://"):
+        return 0
+    try:
+        return Path(root, run_id).stat().st_mtime_ns
+    except FileNotFoundError:
+        raise HTTPException(404, detail=f"run {run_id!r} not found under {root}")
 
 
 @lru_cache(maxsize=8)
-def _open_run(root: str, run_id: str) -> xr.Dataset:
-    return open_iterations_dataset(Path(root) / run_id)
-
-
-def _get_run(run_id: str) -> xr.Dataset:
-    root = _store_root()
-    if run_id not in _list_runs(root):
+def _open_run(root: str, run_id: str, token: int) -> xr.Dataset:
+    try:
+        return open_iterations_dataset(f"{root}/{run_id}")
+    except FileNotFoundError:
         raise HTTPException(404, detail=f"run {run_id!r} not found under {root}")
-    return _open_run(str(root), run_id)
 
 
-def _frame_iterations(ds: xr.Dataset, run_id: str, frame: int) -> np.ndarray:
+def _get_run(run_id: str) -> tuple[xr.Dataset, str, int]:
+    root = _store_root()
+    _validate_run_id(run_id)
+    token = _cache_token(root, run_id)
+    return _open_run(root, run_id, token), root, token
+
+
+@lru_cache(maxsize=8)
+def _rgb_frame(root: str, run_id: str, token: int, frame: int,
+               cmap: str, freq: float) -> np.ndarray:
+    """Colourised (H, W, 3) frame. One entry serves the frame PNG and every
+    tile of that frame; ~14 MB per 2160² entry at maxsize=8.
+
+    Colourising happens frame-wide, never per-tile: colorize() identifies
+    the set as the array max, which only holds for the whole frame.
+    """
+    ds = _open_run(root, run_id, token)
+    # flipud: stored arrays are math-orientation (y up); images are row-0-top.
+    iterations = np.flipud(ds.iterations.isel(frame=frame).values)
+    return colorize(iterations, cmap=cmap, freq=freq)
+
+
+def _rgb_or_error(run_id: str, frame: int, cmap: str, freq: float) -> np.ndarray:
+    ds, root, token = _get_run(run_id)
     n_frames = ds.sizes["frame"]
     if not 0 <= frame < n_frames:
         raise HTTPException(404, detail=f"frame {frame} out of range for {run_id!r} (0..{n_frames - 1})")
-    # flipud: stored arrays are math-orientation (y up); images are row-0-top.
-    return np.flipud(ds.iterations.isel(frame=frame).values)
+    try:
+        return _rgb_frame(root, run_id, token, frame, cmap, freq)
+    except KeyError:
+        raise HTTPException(400, detail=f"unknown palette {cmap!r}; see render.palettes.available()")
 
 
 def _png_response(rgb: np.ndarray, resize_to: int | None = None) -> Response:
@@ -84,14 +139,6 @@ def _png_response(rgb: np.ndarray, resize_to: int | None = None) -> Response:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return Response(buf.getvalue(), media_type="image/png")
-
-
-def _colorize_or_400(iterations: np.ndarray, cmap: str, freq: float) -> np.ndarray:
-    try:
-        get_cmap(cmap)
-    except KeyError:
-        raise HTTPException(400, detail=f"unknown palette {cmap!r}; see render.palettes.available()")
-    return colorize(iterations, cmap=cmap, freq=freq)
 
 
 @app.get("/healthz")
@@ -106,19 +153,23 @@ def runs() -> dict:
 
 @app.get("/runs/{run_id}")
 def run_metadata(run_id: str) -> dict:
-    ds = _get_run(run_id)
+    ds, _, _ = _get_run(run_id)
+    frame_idx = ds.frame.values
+    center_re = ds.center_re.values
+    center_im = ds.center_im.values
+    width = ds.width.values
     return {
         "id": run_id,
         "n_frames": int(ds.sizes["frame"]),
         "resolution": int(ds.sizes["y"]),
         "frames": [
             {
-                "frame": int(ds.frame.values[i]),
-                "center_re": float(ds.center_re.values[i]),
-                "center_im": float(ds.center_im.values[i]),
-                "width": float(ds.width.values[i]),
+                "frame": int(f),
+                "center_re": float(cr),
+                "center_im": float(ci),
+                "width": float(w),
             }
-            for i in range(ds.sizes["frame"])
+            for f, cr, ci, w in zip(frame_idx, center_re, center_im, width)
         ],
     }
 
@@ -130,8 +181,7 @@ def frame_png(
     cmap: str = DEFAULT_PALETTE,
     freq: float = DEFAULT_FREQ,
 ) -> Response:
-    iterations = _frame_iterations(_get_run(run_id), run_id, frame)
-    return _png_response(_colorize_or_400(iterations, cmap, freq))
+    return _png_response(_rgb_or_error(run_id, frame, cmap, freq))
 
 
 @app.get("/tiles/{run_id}/{frame}/{z}/{x}/{y}.png")
@@ -144,8 +194,8 @@ def tile_png(
     cmap: str = DEFAULT_PALETTE,
     freq: float = DEFAULT_FREQ,
 ) -> Response:
-    iterations = _frame_iterations(_get_run(run_id), run_id, frame)
-    resolution = iterations.shape[0]
+    rgb = _rgb_or_error(run_id, frame, cmap, freq)
+    resolution = rgb.shape[0]
     n_tiles = 2**z
     if z < 0 or n_tiles > resolution:
         raise HTTPException(404, detail=f"zoom {z} out of range for resolution {resolution}")
@@ -153,7 +203,4 @@ def tile_png(
         raise HTTPException(404, detail=f"tile ({x}, {y}) out of range at zoom {z}")
     r0, r1 = y * resolution // n_tiles, (y + 1) * resolution // n_tiles
     c0, c1 = x * resolution // n_tiles, (x + 1) * resolution // n_tiles
-    # Colourise the whole frame, then slice: colorize() identifies the set
-    # as the array max, which only holds frame-wide, not per-tile.
-    rgb = _colorize_or_400(iterations, cmap, freq)
     return _png_response(rgb[r0:r1, c0:c1], resize_to=TILE_SIZE)

@@ -95,9 +95,10 @@ def compute_frame(
     cr, ci, mask, zr, zi, zr2, zi2, out = _init_frame(
         center_re, center_im, width, resolution, max_iter, device
     )
+    # k passes as a Python scalar: eager torch.where takes it without a
+    # host→device copy. Only the compiled path needs a device counter.
     for k in range(max_iter):
-        k_t = torch.tensor(k, dtype=torch.int32, device=device)
-        zr, zi, zr2, zi2, mask, out = _step(zr, zi, zr2, zi2, cr, ci, mask, out, k_t)
+        zr, zi, zr2, zi2, mask, out = _step(zr, zi, zr2, zi2, cr, ci, mask, out, k)
 
     return out.cpu().numpy().astype(ITERATIONS_DTYPE)
 

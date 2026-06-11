@@ -120,9 +120,7 @@ def chart(records: list[dict], machine: str) -> Path:
                 ha="center", va="bottom", fontsize=8, color="#555", rotation=0)
 
     speedup = values[-1] / values[0]
-    n_impls = {"seven": 7, "eight": 8, "nine": 9}
-    word = next((w for w, n in n_impls.items() if n == len(records)), str(len(records)))
-    ax.set_title(f"One Mandelbrot kernel, {word} implementations — {speedup:,.0f}× faster, s00 → s06",
+    ax.set_title(f"One Mandelbrot kernel, {len(records)} implementations — {speedup:,.0f}× faster, s00 → s06",
                  fontsize=13, fontweight="bold")
     legend = [plt.Rectangle((0, 0), 1, 1, color="#13aa9b"),
               plt.Rectangle((0, 0), 1, 1, color="#e8a33d")]

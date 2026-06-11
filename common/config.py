@@ -14,6 +14,14 @@ individual `MANDELFLOW_*` env vars override specific fields.
 
 Resolution is square; max_iter is scheduled per-frame (cheap outer frames,
 expensive deep frames) via `common.schedule.max_iter_schedule`.
+
+Service-level (non-workload) vars in the MANDELFLOW_* namespace, kept out
+of RunConfig but listed here so the namespace stays auditable in one file:
+
+  MANDELFLOW_OUTPUT      — store path the s09+ task modes read (run.py docs)
+  MANDELFLOW_STORE_ROOT  — store root the s12 viewer serves from
+  MANDELFLOW_KERNEL      — kernel selection for orchestration/definitions.py
+  MANDELFLOW_STORAGE     — zarr|icechunk IOManager selection (DESIGN.md §3)
 """
 
 from __future__ import annotations

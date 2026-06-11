@@ -99,10 +99,8 @@ def test_view_contains_both_in_set_and_escaped_pixels(compute_frame):
 def test_s05_compiled_matches_eager():
     """Same math, fused dispatch — results may differ only where kernel
     fusion changes float32 rounding right at the escape boundary."""
-    import numpy as np
+    from common.testing import assert_iterations_close
 
     eager = s05_compute(-0.75, 0.0, 3.5, 64, 256)
     compiled = s05_compiled(-0.75, 0.0, 3.5, 64, 256)
-    delta = np.abs(eager.astype(np.int32) - compiled.astype(np.int32))
-    assert (delta <= 1).mean() > 0.99
-    assert np.median(delta) == 0
+    assert_iterations_close(compiled, eager)

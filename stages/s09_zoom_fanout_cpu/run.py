@@ -89,7 +89,13 @@ K8S_JOB_TEMPLATE = (
 
 
 def _open_repo(path: str):
-    """Open or create an icechunk repo at the given path (local FS or gs://)."""
+    """Open or create an icechunk repo at the given path (local FS or gs://).
+
+    The credential preflight lives here, not in the per-mode entrypoints,
+    so dispatcher, K8s task, and Cloud Run task modes all fail the same
+    one-clear-line way when run locally without ADC.
+    """
+    require_gcp_credentials("Stage 09", path)
     import icechunk
     if path.startswith("gs://"):
         parts = path[5:].split("/", 1)
@@ -399,7 +405,6 @@ def run_dispatch(argv: list[str] | None) -> None:
 
     # Init icechunk schema once on the dispatcher (avoid open_or_create race).
     if not args.dry_run:
-        require_gcp_credentials("Stage 09", output)
         print("  initialising icechunk repo + schema...", file=log, flush=True)
         repo = _open_repo(output)
         _init_schema(repo, cfg.n_frames, cfg.resolution)

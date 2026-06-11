@@ -124,6 +124,23 @@ def test_tile_out_of_range_is_404(client):
     assert client.get("/tiles/demo.zarr/0/9/0/0.png").status_code == 404
 
 
+def test_rewritten_run_is_picked_up_without_restart(client, store_root):
+    # The dataset cache is keyed by store mtime: deleting and re-writing a
+    # run (the normal re-materialise cycle) must serve the new data, not a
+    # stale cached handle.
+    assert client.get("/runs/demo.zarr").json()["n_frames"] == N_FRAMES
+
+    import shutil
+
+    shutil.rmtree(store_root / "demo.zarr")
+    path = store_root / "demo.zarr"
+    create_iterations_dataset(path, n_frames=N_FRAMES + 3, resolution=RESOLUTION)
+    write_frame(path, 0, np.zeros((RESOLUTION, RESOLUTION), dtype=np.uint16),
+                center_re=0.0, center_im=0.0, width=1.0)
+
+    assert client.get("/runs/demo.zarr").json()["n_frames"] == N_FRAMES + 3
+
+
 def test_tile_set_detection_is_frame_wide(tmp_path, monkeypatch):
     # colorize() paints the array max black ("the set"). A tile whose pixels
     # all escaped must not have its *local* max painted black — set

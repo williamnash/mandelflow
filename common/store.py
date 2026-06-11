@@ -18,6 +18,10 @@ import xarray as xr
 
 ITERATIONS_DTYPE = np.uint16
 
+# The store formats open_iterations_dataset can dispatch on. Anything
+# listing or filtering runs (e.g. the stage-12 viewer) keys off this.
+STORE_SUFFIXES = (".zarr", ".icechunk")
+
 
 def open_iterations_dataset(path: str | Path) -> xr.Dataset:
     """Open an iterations dataset from raw Zarr or an icechunk repo.

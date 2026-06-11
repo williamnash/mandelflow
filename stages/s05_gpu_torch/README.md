@@ -46,17 +46,19 @@ On a **discrete CUDA GPU**, all three of these pressures are different: massivel
 
 ## The fix, demonstrated: `compute_frame_compiled`
 
-Reason 2 is the one `torch.compile` erases, and the module ships both variants so the difference is measurable rather than asserted. `compute_frame_compiled` runs the *same* `_step` function through inductor, which fuses each iteration's ~10 tensor ops into one device kernel — one launch per iteration instead of ~10. Measured on Apple MPS (torch 2.12, best of 3 after warm-up):
+Reason 2 is the one `torch.compile` shrinks, and the module ships both variants so the difference is measurable rather than asserted. `compute_frame_compiled` runs the *same* `_step` function through inductor, which fuses each iteration's ~10 tensor ops into one device kernel — one launch per iteration instead of ~10. Measured on Apple MPS (torch 2.12, best of 3 after warm-up):
 
 | Frame | eager | compiled | speedup |
 |---|---|---|---|
-| 256² × 512 iter | 183 ms | 27 ms | **6.7×** |
-| 1024² × 512 iter | 339 ms | 137 ms | 2.5× |
-| 2048² × 256 iter | 583 ms | 266 ms | 2.2× |
+| 256² × 512 iter | 64 ms | 27 ms | **2.3×** |
+| 1024² × 512 iter | 169 ms | 137 ms | 1.2× |
+| 2048² × 256 iter | 459 ms | 265 ms | 1.7× |
 
-The shape of that table *is* the lesson: small frames are dispatch-bound, so fusion pays most there; large frames become memory-bandwidth-bound and the remaining ~2× comes from fewer passes over the tensors. Reasons 1 and 3 (lockstep iteration, `where` not skipping FLOPs) are untouched — that ceiling only falls in s06's shader, where each pixel runs its own loop with a real `break`.
+A real but modest win — fusion pays most where launches dominate (small frames) and least where the work is memory-bandwidth-bound. The honest takeaway: on this hardware, fixing the dispatcher buys ~1.2–2.3×, while reasons 1 and 3 (lockstep iteration, `where` not skipping FLOPs) are untouched — that ceiling only falls in s06's shader, where each pixel runs its own loop with a real `break`, worth another ~30× (see the bench chart).
 
-Two implementation details worth reading in `compute.py`: the compile is `dynamic=True` so one compile serves every resolution, and the iteration counter is a device tensor — passing a fresh Python int each pass would make dynamo specialise (recompile) per `k` value. First call pays a one-off compile cost (a few seconds); `torch >= 2.7` is required for inductor on MPS.
+A benchmarking trap worth owning: an earlier draft of this comparison accidentally slowed the *eager* baseline (a per-iteration host→device scalar copy introduced during refactoring) and the compiled variant looked 6.7× faster. Always re-measure the baseline you ship, not the baseline you remember — written up in `docs/GOTCHAS.md`.
+
+Two implementation details worth reading in `compute.py`: the compile is `dynamic=True` so one compile serves every resolution, and the *compiled* path keeps its iteration counter on device — a fresh Python int each pass would make dynamo specialise (recompile) per `k` value, while the eager path passes the plain int (eager `torch.where` takes scalars without a transfer). First call pays a one-off compile cost (a few seconds); `torch >= 2.7` is required for inductor on MPS.
 
 ## Why s05 still matters
 

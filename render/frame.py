@@ -17,8 +17,8 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import xarray as xr
 
+from common.store import open_iterations_dataset
 from render.palettes import DEFAULT_FREQ, DEFAULT_PALETTE, colorize
 
 
@@ -64,7 +64,7 @@ def main(argv: list[str] | None = None) -> None:
         args.output = args.input.with_suffix(".png")
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
-    ds = xr.open_zarr(args.input)
+    ds = open_iterations_dataset(args.input)
     iterations = ds.iterations.isel(frame=args.frame).values
     print(f"render: {args.input} [frame={args.frame}, shape={iterations.shape}]")
     print(f"  range: {int(iterations.min())} .. {int(iterations.max())}")

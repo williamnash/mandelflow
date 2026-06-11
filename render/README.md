@@ -11,7 +11,7 @@ iterations (frame, y, x) uint16          common.store.open_iterations_dataset
 palettes.colorize  ──►  (H, W, 3) uint8 RGB
         │
         ├── frame.py      one frame → PNG        uv run python -m render.frame --input out/run.zarr
-        └── animation.py  all frames → MP4       uv run python -m render.animation out/run.zarr
+        └── animation.py  all frames → MP4       uv run python -m render.animation --input out/run.zarr
 ```
 
 The stage-12 FastAPI viewer is a third consumer of the same `colorize` — stills, video, and the HTTP tile server agree pixel-for-pixel by construction.

@@ -15,7 +15,7 @@ uv run uvicorn stages.s12_viewer_fastapi.main:app
 # → http://127.0.0.1:8000/docs for the interactive API browser
 ```
 
-The store root defaults to `out/`; point elsewhere with `MANDELFLOW_STORE_ROOT=/path/to/stores` (raw `.zarr` and `.icechunk` runs both work — `common.store.open_iterations_dataset` handles either backend).
+The store root defaults to `out/`; point elsewhere with `MANDELFLOW_STORE_ROOT=/path/to/stores` or `MANDELFLOW_STORE_ROOT=gs://bucket/prefix` (raw `.zarr` and `.icechunk` runs both work — `common.store.open_iterations_dataset` handles either backend, and gs:// listing goes through gcsfs). For local roots a deleted-and-rewritten run is picked up without a restart (caches key on the store directory's mtime); gs:// runs and in-place icechunk commits serve the snapshot first opened until restart.
 
 ## Endpoints
 
@@ -31,7 +31,7 @@ Colouring is `render.palettes.colorize` — the same per-pixel, statistic-free c
 
 ## Tiles without a pyramid
 
-DESIGN.md §11 sketches a materialised tile *pyramid* as its own artifact. v1 skips it: each frame is a single `(1, H, W)` Zarr chunk, so serving tile `(z, x, y)` is one chunk read + an array slice + a resize — fast enough that pregeneration would be premature. The quadtree arithmetic lives in the URL (`2^z` tiles per side); a real pyramid store can slot in behind the same routes when frame resolution outgrows slice-and-resize.
+DESIGN.md §11 sketches a materialised tile *pyramid* as its own artifact. v1 skips it: each frame is a single `(1, H, W)` Zarr chunk, and the *colourised* frame is LRU-cached — so a viewport's worth of tile requests pays one chunk read + one colorize, then pure slicing. The quadtree arithmetic lives in the URL (`2^z` tiles per side); a real pyramid store can slot in behind the same routes when frame resolution outgrows slice-and-resize.
 
 One subtlety worth reading in `main.py`: `colorize` identifies "the set" as the array max, which only holds **frame-wide**. Tiles are therefore sliced from the colourised frame, never colourised per-tile — otherwise an all-escaped tile would paint its local max black.
 

@@ -12,6 +12,7 @@ from google.auth.exceptions import DefaultCredentialsError
 
 from stages.s08_zoom_cloud_cpu.run import main as s08_main
 from stages.s09_zoom_fanout_cpu.run import run_dispatch as s09_dispatch
+from stages.s09_zoom_fanout_cpu.run import run_task as s09_task
 
 
 @pytest.fixture()
@@ -34,6 +35,21 @@ def test_s08_local_output_needs_no_credentials(tmp_path, no_gcp_credentials):
     assert out.exists()
 
 
-def test_s09_gs_output_without_credentials_fails_with_one_clear_line(no_gcp_credentials):
+def test_s09_dispatch_without_credentials_fails_with_one_clear_line(
+    no_gcp_credentials, monkeypatch
+):
+    # run_dispatch writes MANDELFLOW_OUTPUT into os.environ; setenv first so
+    # monkeypatch restores it and the gs://nope path can't leak to later tests.
+    monkeypatch.setenv("MANDELFLOW_OUTPUT", "gs://nope/run.icechunk")
     with pytest.raises(SystemExit, match="Stage 09 requires GCP credentials"):
         s09_dispatch(["--output", "gs://nope/run.icechunk", "--target", "gke"])
+
+
+def test_s09_task_mode_without_credentials_fails_with_one_clear_line(
+    no_gcp_credentials, monkeypatch
+):
+    # Pod-side path (K8s / Cloud Run task) must fail the same way as the
+    # dispatcher when reproduced locally without ADC.
+    monkeypatch.setenv("MANDELFLOW_OUTPUT", "gs://nope/run.icechunk")
+    with pytest.raises(SystemExit, match="Stage 09 requires GCP credentials"):
+        s09_task(0, 1)
