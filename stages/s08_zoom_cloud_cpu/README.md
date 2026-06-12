@@ -1,13 +1,13 @@
 # Stage 08 — Single cloud machine, CPU kernel
 
-The simplest cloud-deployment shape: one **GCE VM** running mandelflow's existing Docker image. Each frame is computed via **s04's pattern** (s03 numba kernel + Dask intra-frame tile fanout), so all available CPU cores on the VM are saturated. Output to GCS. No K8s cluster, no GPU. This is the first stage in the cloud progression and the deployable target while GPU quota is unresolved.
+The simplest cloud-deployment shape: one **GCE VM** running mandelflow's existing Docker image. Each frame is computed via **s04's pattern** (s03 numba kernel + Dask intra-frame tile fanout), so all available CPU cores on the VM are saturated. Output to GCS or S3. No K8s cluster, no GPU. This is the first stage in the cloud progression and the deployable target while GPU quota is unresolved.
 
 ## Where this sits in the cloud progression
 
 |  | CPU | GPU |
 |---|---|---|
 | Single | **s08** (this stage) | [s10](../s10_zoom_cloud_gpu/) — placeholder |
-| Many | [s09](../s09_zoom_fanout_cpu/) — placeholder | [s11](../s11_zoom_fanout_gpu/) — scaffold |
+| Many | [s09](../s09_zoom_fanout_cpu/) — cloud-validated | [s11](../s11_zoom_fanout_gpu/) — scaffold |
 
 Each adjacent stage adds exactly one axis: **s09** = s08 + machine count; **s10** = s08 + GPU; **s11** = both.
 

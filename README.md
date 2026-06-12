@@ -11,8 +11,8 @@ The whole project hangs on one design choice: **the data product is the Zarr sto
 ```
 ┌──────────────────────┐   compute    ┌──────────────────────┐    read     ┌──────────────────────┐
 │   Dagster            │  ────────▶   │   Zarr store         │  ◀────────  │   render/  (PNGs,    │
-│   (asset model,      │              │   (local FS or       │             │   MP4, comparisons)  │
-│    pod partitions,   │              │    gs://bucket)      │             └──────────────────────┘
+│   (asset model,      │              │   (local FS, gs://,  │             │   MP4, comparisons)  │
+│    pod partitions,   │              │    or s3://)         │             └──────────────────────┘
 │    IOManagers)       │              │                      │    read     ┌──────────────────────┐
 └──────────────────────┘              │   xarray dataset,    │  ◀────────  │   FastAPI viewer     │
                                       │   self-describing,   │             │   (stage 12 — read-  │
@@ -61,7 +61,7 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for why Zarr, why xarray, why Dagster, wh
 | 06 | `s06_gpu_shader` | GLSL via ModernGL (EGL on Linux, hidden window on macOS) | Raw Zarr (local FS) | 1 frame, 16000×16000 | needs OpenGL 4.1+ GPU |
 | 07 | `s07_zoom_local` | Multi-frame zoom on one machine using s06's kernel with shared GL context | **icechunk** (local FS) | 100 frames, 1080p | needs OpenGL 4.1+ GPU |
 | 08 | `s08_zoom_cloud_cpu` | Single GCE VM, CPU kernel (s03); s07's loop, output to GCS | Zarr in GCS | 200 frames, 1080p | needs GCP creds |
-| 09 | `s09_zoom_fanout_cpu` | Cloud Run Jobs CPU fan-out (N parallel tasks × s03 numba kernel) | **icechunk** in GCS | 1000 frames, 1080p | needs GCP creds |
+| 09 | `s09_zoom_fanout_cpu` | Cloud Run Jobs / GKE Indexed Jobs CPU fan-out (stride-sharded frames × s03 numba kernel) | **icechunk** in GCS | 1000 frames, 1080p | needs GCP creds |
 | 10 | `s10_zoom_cloud_gpu` | Single cloud VM with a GPU, s06 kernel — placeholder (GCP quota blocked) | Zarr in GCS | 200 frames, 1080p | (not yet built) |
 | 11 | `s11_zoom_fanout_gpu` | GKE multi-Pod fan-out, frame range per Pod | **icechunk** in GCS | 1000 frames, 1080p | needs GCP creds |
 | 12 | `s12_viewer_fastapi` | FastAPI tile server over precomputed Zarrs (frame PNGs + slippy-map tiles) | reads either backend | – | ✓ (CPU-only) |
@@ -72,7 +72,7 @@ See [`docs/DESIGN.md`](docs/DESIGN.md) for why Zarr, why xarray, why Dagster, wh
 
 The fractal is *identical* at every stage — same `compute_frame` contract, same pixels. What changes is **throughput**: measured on an Apple M2 Max, the single-frame kernel speeds up ~1,000× from s00 to s06. Each tile below paints the same fractal at that stage's real measured rate (pace log-compressed — the true span is ~1,000×):
 
-![Paint race: seven tiles of the same Mandelbrot fractal, each painting top-to-bottom at its stage's measured throughput. The GPU shader tile fills almost instantly while naive Python crawls, and the PyTorch/MPS tile is lapped by optimised CPU.](docs/assets/paint_race.gif)
+![Paint race: eight tiles of the same Mandelbrot fractal, each painting top-to-bottom at its stage's measured throughput. The GPU shader tile fills almost instantly while naive Python crawls, and the PyTorch/MPS tile is lapped by optimised CPU.](docs/assets/paint_race.gif)
 
 Note the **s05 dip** — a naive PyTorch/MPS port is *slower* than optimised CPU here, because the iteration loop is Python-driven (256 sequential GPU launches per frame, so it's launch-bound). The GPU only pays off at s06, where the whole loop runs on-device in the fragment shader.
 
@@ -108,7 +108,7 @@ Developing on macOS? See [`docs/LOCAL_DEV.md`](docs/LOCAL_DEV.md) for stage-by-s
 ```
 mandelflow/
 ├── pyproject.toml           # uv-managed deps (with `gpu` and `cloud` extras)
-├── Dockerfile               # One image for stages 06, 08, 09 deployments
+├── Dockerfile               # One image for stages 06, 08, 09, 12 deployments
 ├── common/                  # Schedule, Zarr schema, colormap — shared by every stage
 ├── stages/                  # One package per stage; each exposes compute_frame(...)
 │   ├── s00_naive/

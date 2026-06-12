@@ -3,6 +3,8 @@
 Dagster owns the write path; this service owns the read path; the Zarr is
 the contract between them (DESIGN.md §4). Endpoints:
 
+  GET /                                     — the interactive UI
+  GET /palettes                             — palette names for the UI
   GET /healthz                              — liveness probe
   GET /runs                                 — list stores under the root
   GET /runs/{run_id}                        — run + per-frame metadata

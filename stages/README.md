@@ -22,7 +22,7 @@ Wall-clock seconds at `resolution=2048`, `max_iter=512`, canonical view
 | [`s06_gpu_shader`](s06_gpu_shader/) | **0.06s (MPS)** | **295×** | GLSL fragment shader; entire iteration loop in one GPU dispatch — barely scales with image size, unlocks deep zoom |
 | [`s07_zoom_local`](s07_zoom_local/) | 1.36s for 120 frames @ 720² | 11.3 ms/frame | Multi-frame zoom on one machine using s06's kernel with shared GL context; produces the first real zoom MP4 |
 | [`s08_zoom_cloud_cpu`](s08_zoom_cloud_cpu/) | working | — | Single cloud VM, CPU kernel (s04 = s03 + Dask local cluster for intra-frame fanout). Writes to GCS. |
-| [`s09_zoom_fanout_cpu`](s09_zoom_fanout_cpu/) | implemented, validated locally | — | Cloud Run Jobs CPU fan-out, N parallel tasks × s03 numba kernel, writes to a shared icechunk repo in GCS |
+| [`s09_zoom_fanout_cpu`](s09_zoom_fanout_cpu/) | implemented, cloud-validated (GKE 2026-06-11) | — | Cloud Run Jobs CPU fan-out, N parallel tasks × s03 numba kernel, writes to a shared icechunk repo in GCS |
 | [`s10_zoom_cloud_gpu`](s10_zoom_cloud_gpu/) | placeholder | — | Single cloud VM, GPU kernel (s06); blocked on GCP `GPUS_ALL_REGIONS` quota |
 | [`s11_zoom_fanout_gpu`](s11_zoom_fanout_gpu/) | scaffold | — | GKE multi-Pod fan-out, GPU per Pod, writing to a shared GCS Zarr |
 | `s12_viewer_fastapi` | — | — | Read service over precomputed Zarrs (not a compute stage) |
@@ -39,7 +39,7 @@ The wall-clock champion on a laptop is **s04 dask_local**, but the right pick de
 | Deep zoom past float32 precision (~10⁶) | s06 gpu_shader |
 | Many frames on a single machine (laptop) | s07 zoom_local |
 | Many frames on one cloud machine, CPU (simplest cloud deploy) | s08 zoom_cloud_cpu |
-| Many frames across many cloud machines, CPU | s09 zoom_fanout_cpu *(placeholder)* |
+| Many frames across many cloud machines, CPU | s09 zoom_fanout_cpu |
 | Many frames on one cloud machine, GPU | s10 zoom_cloud_gpu *(placeholder)* |
 | Many frames across many cloud machines, GPU | s11 zoom_fanout_gpu |
 | To serve precomputed regions in a browser | s12 viewer_fastapi |
@@ -48,6 +48,6 @@ See [`docs/DESIGN.md §12`](../docs/DESIGN.md) for the structural reasoning — 
 
 ## Stage contract
 
-Each compute stage exports `compute_frame(center_re, center_im, width, resolution, max_iter) -> np.ndarray` and a `run.py` CLI. The output dtype is always `uint16`; bounded-set pixels carry the `max_iter` sentinel (see `common/store.py`).
+Each compute stage exports `compute_frame(center_re, center_im, width, resolution, max_iter) -> np.ndarray` and a `run.py` CLI. Variant kernels (any `compute_frame*` callable, e.g. s05's `compute_frame_compiled`) are held to the same parameter prefix; extras must be keyword-with-default (enforced by `tests/unit/stages/test_contract.py`). The output dtype is always `uint16`; bounded-set pixels carry the `max_iter` sentinel (see `common/store.py`).
 
 Cross-stage equivalence (every stage matches s00 within tolerance) is asserted in `tests/integration/test_cross_stage_equivalence.py`.

@@ -15,7 +15,13 @@ Priorities:
 
 ## P0 — correctness
 
-### 1. icechunk coord-array conflicts drop 2 of 4 Pods' metadata
+### 1. ✅ DONE — icechunk coord-array conflicts drop 2 of 4 Pods' metadata
+
+> Fixed together with #3: `_init_schema(repo, cfg)` pre-populates all
+> coords from the canonical schedule and task writes carry only the
+> iterations variable. Re-confirmed in production first (portfolio-
+> stride-002 lost 450/600 coords) and pinned by
+> `tests/integration/test_s09_coords.py`. Original writeup kept below.
 
 **Discovered:** portfolio-003 run on 2026-05-18.
 
@@ -122,7 +128,12 @@ per zone (3× current). Approval is typically same-day.
 **Effort.** 5 min to submit; 4–24 h to approve. Do this before the
 showcase run.
 
-### 5. backoffLimit > 0 in the Job template
+### 5. ✅ DONE — backoffLimit > 0 in the Job template
+
+> Landed as `backoffLimit: 3` **plus** `podFailurePolicy` ignoring
+> `DisruptionTarget` kills — raising the limit alone wasn't enough;
+> autoscaler-churn preemptions burned any finite budget before nodes
+> existed (GOTCHAS #24). Original writeup kept below.
 
 **Discovered:** twice tonight (quota failure, then icechunk conflict
 before the fix) a single Pod's failure killed the entire 4-Pod Job and

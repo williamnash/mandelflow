@@ -243,7 +243,7 @@ vCPU; our cluster's regional node pool was trying to put 8 × e2-standard-2
 - Pods 4–7 stay `Pending` with `FailedScaleUp` events.
 - Eventually one of them fails outright.
 
-**Compounding factor:** our Job template's `backoffLimit: 0` means *any*
+**Compounding factor** *(historical — the template now ships `backoffLimit: 3` plus a `podFailurePolicy` ignoring `DisruptionTarget` kills; see GOTCHAS #24)*: our Job template's `backoffLimit: 0` meant *any*
 Pod failure kills the whole Job, deleting the Pods that *were* working
 mid-flight. Pod 0 had written ~20 frames before being killed.
 
@@ -287,7 +287,7 @@ because the parent it expected (`44DP…`) was no longer the tip.
 
 This is icechunk's optimistic-concurrency contract: each session commits
 on the parent it observed at session open, and a conflict is raised if
-that parent has moved. With our `backoffLimit: 0`, the Pod failure killed
+that parent has moved. With the then-current `backoffLimit: 0`, the Pod failure killed
 the whole Job.
 
 **Fix:** wrap `session.commit()` in a rebase-on-conflict loop. Disjoint

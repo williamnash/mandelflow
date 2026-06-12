@@ -1,6 +1,6 @@
 # Stage 09 — Multi-machine CPU fan-out via Cloud Run Jobs
 
-**Status: implemented + locally validated. Cloud deployment is one `gcloud run jobs create` away.**
+**Status: implemented + cloud-validated** (GKE, 2026-06-11: 4 pods × 150 stride-sharded frames, 600 × 1080² in 8m33s — 2.46× the contiguous-sharding baseline; numbers in [`bench/results/s09_portfolio_stride.json`](../../bench/results/s09_portfolio_stride.json)).
 
 s09 takes s08's "ship s07 to one cloud machine" and scales it across **many machines** by submitting a Cloud Run Job with N parallel tasks. Each task computes its slice of the frame schedule and commits to a shared icechunk repo in GCS.
 

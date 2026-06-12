@@ -3,7 +3,7 @@
 # mandelflow base image. One image, three deployments:
 #   - Stage 06's headless GLSL renderer in Linux environments (EGL via Mesa)
 #   - Stage 08's compute pods on GKE (CUDA + EGL + full stack)
-#   - Stage 09's viewer (tile server) on Cloud Run
+#   - Stage 12's viewer (tile server) on Cloud Run
 #
 # Local development on macOS does NOT use this image; see docs/LOCAL_DEV.md.
 
@@ -57,6 +57,6 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 # No default CMD — every deployment sets one:
 #   Stage 08 compute pod: ["dagster", "job", "execute", ...]
-#   Stage 09 viewer:      ["uvicorn", "stages.s09_viewer_fastapi.main:app", "--host", "0.0.0.0", "--port", "8080"]
+#   Stage 09 viewer:      ["uvicorn", "stages.s12_viewer_fastapi.main:app", "--host", "0.0.0.0", "--port", "8080"]
 ENTRYPOINT []
 CMD ["python", "-c", "raise SystemExit('Override CMD in the K8s pod spec or Cloud Run service config')"]

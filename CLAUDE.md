@@ -11,7 +11,7 @@ Operating context for Claude Code when working in this repo. Keep this file lean
 These exist for explicit design reasons (see `docs/DESIGN.md`). Don't violate them without flagging:
 
 1. **The data product is the Zarr store, not the rendered video.** Compute stages write a labelled xarray-over-Zarr. MP4 / PNG output is downstream rendering, owned by `render/`. Never propose writing MP4 directly from a compute stage.
-2. **Every stage exposes `compute_frame(center_re, center_im, width, resolution, max_iter) -> np.ndarray`** plus a `run.py` CLI. That's the contract Dagster's asset binds to.
+2. **Every stage exposes `compute_frame(center_re, center_im, width, resolution, max_iter) -> np.ndarray`** plus a `run.py` CLI. That's the contract Dagster's asset binds to. Stages may add keyword-only extras with defaults (s05's `device`, s06's `ctx`) and `compute_frame*` variants — the shared prefix is pinned by `tests/unit/stages/test_contract.py`.
 3. **Raw Zarr for stages 00–06; icechunk for stages 07–11.** Stages 00–06 are single-writer (no transactional semantics needed). The icechunk migration at stage 07 is itself a teaching moment — don't move it earlier "for consistency."
 4. **Reproducibility contract:** stages 00–04 must run from `uv sync && uv run python -m stages.<id>.run` on a stock laptop. No GPU, no cloud creds. Stages requiring GPU (05, 06, 07) or cloud (08–11) must fail with **one clear line** naming the missing prerequisite — never a stack trace.
 5. **Cross-platform GL.** `render/gl_context.py` picks hidden pygame (macOS) or EGL standalone (Linux containers). Same shader on both. Don't hard-code one path.
@@ -49,7 +49,7 @@ docs/
   GOTCHAS.md             # Sharp edges journal — append when a new one is found
   WEEKEND_PLAN.md        # Chronological build order
 .github/workflows/       # pr.yml (lint, test, terraform validate, docker build), deploy.yml
-Dockerfile               # Stages 06, 08, 09 deployment image
+Dockerfile               # Stages 06, 08–12 deployment image (one image, per-deploy CMD)
 pyproject.toml           # uv-managed deps
 ```
 
@@ -77,4 +77,6 @@ pyproject.toml           # uv-managed deps
 - `docs/GOTCHAS.md` — known sharp edges; append when a new one is found.
 - `docs/CLOUD_SETUP.md` — provisioning playbook + cloud-specific gotchas.
 - `docs/WEEKEND_PLAN.md` — chronological build order.
+- `docs/NEXT_STEPS.md` — prioritised follow-ups; mark items DONE in place when landed.
+- `docs/RUNBOOK.md` — cloud-run playbook + real failure modes as hit (historical fixes land in code; the writeups stay).
 - `~/workspace/talks/tae-2025-11-21/` — the *Scalable Computing with the Mandelbrot Set* talk this repo extends.

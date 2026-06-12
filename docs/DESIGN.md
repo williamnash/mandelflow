@@ -30,7 +30,7 @@ Overhead is one `Dataset` object per store; the labelled-dimension and self-desc
 Dagster's asset model maps directly onto Zarr-as-data-product:
 
 - **Assets ≡ Zarrs.** The asset graph is the Zarr lineage graph.
-- **Partitions ≡ Pods (workers), not frames.** The `iterations` asset is partitioned by Pod index; each partition's asset code internally loops over a contiguous frame range and shares kernel state (GL context, JIT'd kernel, icechunk session) across those frames. The earlier "one partition per frame" shape was tempting but wrong — per-Pod startup (~25 s on GKE) dwarfed per-frame compute (~10–70 ms), giving a compute-to-startup ratio below 1 %. Pod-partitioning is what makes cloud fan-out worth the operational machinery. See [`FANOUT.md`](FANOUT.md) for the full reasoning, math, and code shape.
+- **Partitions ≡ Pods (workers), not frames.** The `iterations` asset is partitioned by Pod index; each partition's asset code internally loops over a stride-sharded frame set (frames *i, i+k, i+2k, …* — deep frames cost up to ~66× shallow ones, so striding balances Pod loads) and shares kernel state (GL context, JIT'd kernel, icechunk session) across those frames. The earlier "one partition per frame" shape was tempting but wrong — per-Pod startup (~25 s on GKE) dwarfed per-frame compute (~10–70 ms), giving a compute-to-startup ratio below 1 %. Pod-partitioning is what makes cloud fan-out worth the operational machinery. See [`FANOUT.md`](FANOUT.md) for the full reasoning, math, and code shape.
 - **IOManagers ≡ storage.** Configure-time choice between `ZarrFrameIOManager` (raw Zarr at any path — local FS or `gs://`) and `IcechunkFrameIOManager` (icechunk at any path — local FS, `gs://`, `s3://`, Azure, R2, etc.). Both consume a Pod's `dict[frame_idx → ndarray]` output and persist each frame as a region write; icechunk additionally commits once per Pod with a message naming the frame range. The asset doesn't know which IOManager is in use. Selectable via `MANDELFLOW_STORAGE=icechunk` env var. See `orchestration/definitions.py`.
 - **Workload presets ≡ env-driven configs.** `common/config.py` defines three named `RunConfig`s — `demo` / `portfolio` / `showcase` — covering the spectrum from "few-second laptop run" to "4K deep-zoom GKE workload". Selected via `MANDELFLOW_PRESET`; individual fields override via `MANDELFLOW_N_FRAMES`, `_RESOLUTION`, `_N_PODS`, etc. The k8s executor forwards every `MANDELFLOW_*` env var into spawned Pods, so a Pod re-loads `from_env()` and gets the same config the dispatcher had.
 - **Asset graph UI.** `dagster dev` shows lineage, materialisation status, and per-partition runs.
@@ -51,7 +51,7 @@ The split decouples write and read paths through a durable artifact — the mode
 
 Stages 00–04 and 07 run from `uv sync` followed by `uv run python -m stages.<id>.run` on a stock laptop — no GPU, no cloud credentials.
 
-Stages requiring GPU (05, 06) or cloud credentials (08) fail with **one clear line** naming the missing prerequisite (e.g. `Stage 05 requires a GPU (CUDA or MPS). Neither is available.`). Never silently; never with a stack trace.
+Stages requiring GPU (05, 06) or cloud credentials (08–11) fail with **one clear line** naming the missing prerequisite (e.g. `Stage 05 requires a GPU (CUDA or MPS). Neither is available.`). Never silently; never with a stack trace.
 
 CI runs stages 00–04 and 07 at small scales on every PR, verifying each produced Zarr matches a reference array within floating-point tolerance. GPU and cloud stages are import-tested and lint-tested only.
 
