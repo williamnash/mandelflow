@@ -47,10 +47,10 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
+from common.cloud import require_cloud_credentials
 from common.config import RunConfig, describe, frame_indices_for_pod, from_env
-from common.gcp import require_gcp_credentials
 from common.schedule import canonical_schedule
-from common.store import ITERATIONS_DTYPE
+from common.store import ITERATIONS_DTYPE, icechunk_storage, is_object_store_path
 
 # Kernel selector. Default numba_cpu for the s09 CPU path; gke-gpu target
 # in the dispatcher flips this to gpu_shader for s11 reuse. The Pod's env
@@ -89,23 +89,18 @@ K8S_JOB_TEMPLATE = (
 
 
 def _open_repo(path: str):
-    """Open or create an icechunk repo at the given path (local FS or gs://).
+    """Open or create an icechunk repo at the given path (local FS,
+    gs://, or s3://).
 
     The credential preflight lives here, not in the per-mode entrypoints,
     so dispatcher, K8s task, and Cloud Run task modes all fail the same
-    one-clear-line way when run locally without ADC.
+    one-clear-line way when run locally without working cloud credentials.
     """
-    require_gcp_credentials("Stage 09", path)
+    require_cloud_credentials("Stage 09", path)
     import icechunk
-    if path.startswith("gs://"):
-        parts = path[5:].split("/", 1)
-        bucket = parts[0]
-        prefix = parts[1] if len(parts) > 1 else ""
-        storage = icechunk.gcs_storage(bucket=bucket, prefix=prefix)
-    else:
+    if not is_object_store_path(path):
         Path(path).mkdir(parents=True, exist_ok=True)
-        storage = icechunk.local_filesystem_storage(path)
-    return icechunk.Repository.open_or_create(storage)
+    return icechunk.Repository.open_or_create(icechunk_storage(path))
 
 
 def _init_schema(repo, cfg: RunConfig) -> None:

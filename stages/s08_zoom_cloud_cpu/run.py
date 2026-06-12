@@ -2,7 +2,7 @@
 
 Runs s07's loop shape with two adjustments for cloud / parallelism:
 
-  1. `--output` can be a `gs://bucket/path.zarr` URL. xarray + zarr +
+  1. `--output` can be a `gs://` or `s3://` Zarr URL. xarray + zarr +
      gcsfs handle that transparently; `common/store.py` doesn't need to
      know which backend it's hitting.
   2. No GL context is acquired. Compute imports s04 (s03 kernel + Dask
@@ -31,9 +31,9 @@ from pathlib import Path
 
 from dask.distributed import Client, LocalCluster
 
-from common.gcp import require_gcp_credentials
+from common.cloud import require_cloud_credentials
 from common.schedule import canonical_schedule
-from common.store import create_iterations_dataset, write_frame
+from common.store import create_iterations_dataset, is_object_store_path, write_frame
 from stages.s08_zoom_cloud_cpu.compute import compute_frame
 
 
@@ -74,7 +74,7 @@ def main(argv: list[str] | None = None) -> None:
         "--output",
         type=str,
         default="gs://mandelflow-2026-zarr/runs/dev.zarr",
-        help="Zarr store path. Use `gs://bucket/path.zarr` for GCS, "
+        help="Zarr store path. Use `gs://bucket/path.zarr` (GCS) or `s3://bucket/path.zarr` (S3), "
              "or a local path for plumbing tests.",
     )
     parser.add_argument(
@@ -91,10 +91,10 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    require_gcp_credentials("Stage 08", args.output)
+    require_cloud_credentials("Stage 08", args.output)
 
-    # Only create parent dirs for local paths; gs:// has no concept of dirs.
-    if not args.output.startswith("gs://"):
+    # Only create parent dirs for local paths; object stores have no dirs.
+    if not is_object_store_path(args.output):
         Path(args.output).parent.mkdir(parents=True, exist_ok=True)
 
     # Pass overrides only when explicitly set, so defaults stay centralised.

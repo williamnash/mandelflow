@@ -7,6 +7,8 @@ inside the first store write (DESIGN.md §5).
 
 from __future__ import annotations
 
+import types
+
 import pytest
 from google.auth.exceptions import DefaultCredentialsError
 
@@ -53,3 +55,78 @@ def test_s09_task_mode_without_credentials_fails_with_one_clear_line(
     monkeypatch.setenv("MANDELFLOW_OUTPUT", "gs://nope/run.icechunk")
     with pytest.raises(SystemExit, match="Stage 09 requires GCP credentials"):
         s09_task(0, 1)
+
+
+@pytest.fixture()
+def no_aws_credentials(monkeypatch):
+    import botocore.session
+
+    class _NoCreds(botocore.session.Session):
+        def get_credentials(self):
+            return None
+
+    monkeypatch.setattr(botocore.session, "get_session", lambda: _NoCreds())
+
+
+def test_s3_output_without_credentials_fails_with_one_clear_line(no_aws_credentials):
+    from common.cloud import require_cloud_credentials
+
+    with pytest.raises(SystemExit, match="Stage 09 requires AWS credentials"):
+        require_cloud_credentials("Stage 09", "s3://nope/run.icechunk")
+
+
+def test_local_output_needs_no_cloud_credentials(no_aws_credentials, no_gcp_credentials):
+    from common.cloud import require_cloud_credentials
+
+    require_cloud_credentials("Stage 08", "out/local.zarr")  # must not raise
+
+
+def test_s09_task_mode_s3_without_credentials(no_aws_credentials, monkeypatch):
+    monkeypatch.setenv("MANDELFLOW_OUTPUT", "s3://nope/run.icechunk")
+    with pytest.raises(SystemExit, match="Stage 09 requires AWS credentials"):
+        s09_task(0, 1)
+
+
+def test_unknown_remote_scheme_fails_with_one_clear_line():
+    # az:// (unsupported) and gcs:// (a typo of gs://) must be rejected at
+    # preflight — not sail through to a deep fsspec 'Protocol not known'.
+    from common.cloud import require_cloud_credentials
+
+    for bad in ("az://container/run.zarr", "gcs://bucket/run.zarr"):
+        with pytest.raises(SystemExit, match="unsupported output scheme"):
+            require_cloud_credentials("Stage 08", bad)
+
+
+def test_broken_aws_profile_fails_with_one_clear_line(monkeypatch):
+    # botocore RAISES (ProfileNotFound, SSO token errors…) rather than
+    # returning None for several misconfigurations; the preflight must
+    # convert that to the one-clear-line SystemExit, not a traceback.
+    import botocore.session
+    from botocore.exceptions import ProfileNotFound
+
+    def boom():
+        raise ProfileNotFound(profile="stale-name")
+
+    monkeypatch.setattr(botocore.session, "get_session", boom)
+    from common.aws import require_aws_credentials
+
+    with pytest.raises(SystemExit, match="requires working AWS credentials"):
+        require_aws_credentials("Stage 09", "s3://nope/run.icechunk")
+
+
+def test_aws_credentials_without_region_fail_clearly(monkeypatch):
+    # icechunk's S3 client resolves region from the environment; creds
+    # without a region pass a naive check then die in the Rust layer.
+    import botocore.session
+
+    fake = types.SimpleNamespace(
+        get_credentials=lambda: object(),
+        get_config_variable=lambda name: None,
+    )
+    monkeypatch.setattr(botocore.session, "get_session", lambda: fake)
+    monkeypatch.delenv("AWS_REGION", raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    from common.aws import require_aws_credentials
+
+    with pytest.raises(SystemExit, match="AWS_REGION"):
+        require_aws_credentials("Stage 09", "s3://nope/run.icechunk")
