@@ -80,17 +80,20 @@ def test_list_stores_local(tmp_path):
     assert list_stores(str(tmp_path)) == ["a.zarr", "b.icechunk"]
 
 
-@pytest.mark.parametrize(
-    "scheme,module,fs_class",
-    [("gs", "gcsfs", "GCSFileSystem"), ("s3", "s3fs", "S3FileSystem")],
-)
-def test_list_stores_remote(monkeypatch, scheme, module, fs_class):
+@pytest.mark.parametrize("scheme", ["gs", "s3"])
+def test_list_stores_remote(monkeypatch, scheme):
     entries = ["bkt/runs/a.zarr", "bkt/runs/b.icechunk/", "bkt/runs/junk.txt"]
-    fake_fs = types.SimpleNamespace(ls=lambda p: entries)
+    seen = {}
+
+    def fake_filesystem(proto):
+        seen["scheme"] = proto
+        return types.SimpleNamespace(ls=lambda p: entries)
+
     monkeypatch.setitem(
-        sys.modules, module, types.SimpleNamespace(**{fs_class: lambda: fake_fs})
+        sys.modules, "fsspec", types.SimpleNamespace(filesystem=fake_filesystem)
     )
     assert list_stores(f"{scheme}://bkt/runs") == ["a.zarr", "b.icechunk"]
+    assert seen["scheme"] == scheme
 
 
 def test_list_stores_missing_local_root_is_empty(tmp_path):

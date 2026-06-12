@@ -39,6 +39,8 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "s3fs>=2026.3.0",               # S3-backed stores — cloud-agnostic twin of gcsfs
+    "fsspec>=2024.10",              # list_stores remote listing; don't rely on it transitively
+    "botocore>=1.34",               # credential preflight (common/aws.py); don't rely on it transitively
 ]
 
 [project.optional-dependencies]

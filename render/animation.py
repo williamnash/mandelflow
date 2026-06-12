@@ -46,11 +46,9 @@ def render_zarr_to_mp4(
     `crf` controls quality: 17 ≈ visually lossless, 23 = ffmpeg
     default, 28 = noticeable artifacts. Lower = bigger file.
 
-    Accepts both raw Zarr stores and icechunk repos. Path types:
-      - `path/to/run.zarr`            → raw Zarr (local FS)
-      - `gs://bucket/run.zarr`        → raw Zarr in GCS
-      - `path/to/run.icechunk`        → icechunk repo (local FS)
-      - `gs://bucket/run.icechunk`    → icechunk repo in GCS
+    Accepts both raw Zarr stores and icechunk repos, local or object
+    store (`gs://` / `s3://`) — see common.store.open_iterations_dataset
+    for the full path-shape list.
     """
     ds = _open_dataset(zarr_path)
     n_frames = ds.sizes["frame"]

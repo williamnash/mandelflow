@@ -33,7 +33,7 @@ from dask.distributed import Client, LocalCluster
 
 from common.cloud import require_cloud_credentials
 from common.schedule import canonical_schedule
-from common.store import create_iterations_dataset, write_frame
+from common.store import create_iterations_dataset, is_object_store_path, write_frame
 from stages.s08_zoom_cloud_cpu.compute import compute_frame
 
 
@@ -94,7 +94,7 @@ def main(argv: list[str] | None = None) -> None:
     require_cloud_credentials("Stage 08", args.output)
 
     # Only create parent dirs for local paths; object stores have no dirs.
-    if "://" not in args.output:
+    if not is_object_store_path(args.output):
         Path(args.output).parent.mkdir(parents=True, exist_ok=True)
 
     # Pass overrides only when explicitly set, so defaults stay centralised.

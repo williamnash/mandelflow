@@ -22,11 +22,42 @@ ITERATIONS_DTYPE = np.uint16
 # listing or filtering runs (e.g. the stage-12 viewer) keys off this.
 STORE_SUFFIXES = (".zarr", ".icechunk")
 
+# The object-store schemes the repo supports, in one place. Every
+# "is this remote?" check and every storage factory keys off this —
+# scheme dispatch copy-pasted per call site is how the IOManagers
+# silently missed s3:// support while the stages gained it.
+OBJECT_STORE_SCHEMES = ("gs://", "s3://")
+
+
+def is_object_store_path(path: str | Path) -> bool:
+    return str(path).startswith(OBJECT_STORE_SCHEMES)
+
 
 def _split_bucket_prefix(path_str: str) -> tuple[str, str]:
     bucket_and_prefix = path_str.split("://", 1)[1]
     parts = bucket_and_prefix.split("/", 1)
     return parts[0], parts[1] if len(parts) > 1 else ""
+
+
+def icechunk_storage(path: str | Path):
+    """The one scheme → icechunk storage mapping.
+
+    Shared by every icechunk opener (read-side `open_iterations_dataset`,
+    s09's task `_open_repo`, the Dagster IcechunkFrameIOManager) so a new
+    backend or a storage-kwarg change lands everywhere at once. AWS
+    credentials and region come from the environment (`from_env=True`);
+    the preflight in common/aws.py checks both up front.
+    """
+    import icechunk
+
+    path_str = str(path).rstrip("/")
+    if path_str.startswith("gs://"):
+        bucket, prefix = _split_bucket_prefix(path_str)
+        return icechunk.gcs_storage(bucket=bucket, prefix=prefix)
+    if path_str.startswith("s3://"):
+        bucket, prefix = _split_bucket_prefix(path_str)
+        return icechunk.s3_storage(bucket=bucket, prefix=prefix, from_env=True)
+    return icechunk.local_filesystem_storage(path_str)
 
 
 def open_iterations_dataset(path: str | Path) -> xr.Dataset:
@@ -48,15 +79,7 @@ def open_iterations_dataset(path: str | Path) -> xr.Dataset:
     if path_str.endswith(".icechunk"):
         import icechunk
 
-        if path_str.startswith("gs://"):
-            bucket, prefix = _split_bucket_prefix(path_str)
-            storage = icechunk.gcs_storage(bucket=bucket, prefix=prefix)
-        elif path_str.startswith("s3://"):
-            bucket, prefix = _split_bucket_prefix(path_str)
-            storage = icechunk.s3_storage(bucket=bucket, prefix=prefix, from_env=True)
-        else:
-            storage = icechunk.local_filesystem_storage(path_str)
-        repo = icechunk.Repository.open(storage)
+        repo = icechunk.Repository.open(icechunk_storage(path_str))
         return xr.open_zarr(repo.readonly_session("main").store)
     return xr.open_zarr(path_str)
 
@@ -70,17 +93,13 @@ def list_stores(root: str | Path) -> list[str]:
     (the viewer treats "nothing there yet" as a normal state).
     """
     root_str = str(root).rstrip("/")
-    if root_str.startswith(("gs://", "s3://")):
-        if root_str.startswith("gs://"):
-            import gcsfs
+    if is_object_store_path(root_str):
+        import fsspec
 
-            fs = gcsfs.GCSFileSystem()
-        else:
-            import s3fs
-
-            fs = s3fs.S3FileSystem()
+        scheme, rest = root_str.split("://", 1)
+        fs = fsspec.filesystem(scheme)
         try:
-            entries = fs.ls(root_str.split("://", 1)[1])
+            entries = fs.ls(rest)
         except FileNotFoundError:
             return []
         return sorted(

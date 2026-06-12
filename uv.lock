@@ -1774,10 +1774,12 @@ name = "mandelflow"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "botocore" },
     { name = "dagster" },
     { name = "dagster-webserver" },
     { name = "dask", extra = ["distributed"] },
     { name = "fastapi" },
+    { name = "fsspec" },
     { name = "gcsfs" },
     { name = "google-auth" },
     { name = "icechunk" },
@@ -1812,12 +1814,14 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "botocore", specifier = ">=1.34" },
     { name = "dagster", specifier = ">=1.9" },
     { name = "dagster-gcp", marker = "extra == 'cloud'", specifier = ">=0.25" },
     { name = "dagster-k8s", marker = "extra == 'cloud'", specifier = ">=0.25" },
     { name = "dagster-webserver", specifier = ">=1.9" },
     { name = "dask", extras = ["distributed"], specifier = ">=2024.10" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "fsspec", specifier = ">=2024.10" },
     { name = "gcsfs", specifier = ">=2024.10" },
     { name = "google-auth", specifier = ">=2.30" },
     { name = "icechunk", specifier = ">=0.2" },

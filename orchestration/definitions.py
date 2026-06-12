@@ -52,7 +52,13 @@ from dagster import (
 
 from common.config import RunConfig, describe, frame_indices_for_pod, from_env
 from common.schedule import canonical_schedule
-from common.store import ITERATIONS_DTYPE, create_iterations_dataset, write_frame
+from common.store import (
+    ITERATIONS_DTYPE,
+    create_iterations_dataset,
+    icechunk_storage,
+    is_object_store_path,
+    write_frame,
+)
 
 # Resolve the run config at module load. The k8s executor forwards
 # MANDELFLOW_* env vars so each Pod sees the same config.
@@ -109,8 +115,9 @@ class ZarrFrameIOManager(ConfigurableIOManager):
     resolution: int
 
     def _ensure_dataset(self) -> None:
-        is_gcs = self.path.startswith("gs://")
-        if not is_gcs and Path(self.path).exists():
+        # Object-store paths always re-create (the documented first-write
+        # race caveat); local paths skip when the store already exists.
+        if not is_object_store_path(self.path) and Path(self.path).exists():
             return
         create_iterations_dataset(self.path, self.n_frames, self.resolution)
 
@@ -166,15 +173,9 @@ class IcechunkFrameIOManager(ConfigurableIOManager):
 
     def _open_repo(self):
         import icechunk
-        if self.path.startswith("gs://"):
-            parts = self.path[5:].split("/", 1)
-            bucket = parts[0]
-            prefix = parts[1] if len(parts) > 1 else ""
-            storage = icechunk.gcs_storage(bucket=bucket, prefix=prefix)
-        else:
+        if not is_object_store_path(self.path):
             Path(self.path).mkdir(parents=True, exist_ok=True)
-            storage = icechunk.local_filesystem_storage(self.path)
-        return icechunk.Repository.open_or_create(storage)
+        return icechunk.Repository.open_or_create(icechunk_storage(self.path))
 
     def _ensure_schema(self, repo) -> None:
         """Initialise the dataset schema if the repo is empty. Idempotent."""
